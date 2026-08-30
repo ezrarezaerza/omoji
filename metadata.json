@@ -1,0 +1,7 @@
+{
+  "name": "Omoji - Sticker Studio",
+  "description": "Create fun custom WhatsApp stickers from your favorite photos and memes with effortless 1-click magic.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

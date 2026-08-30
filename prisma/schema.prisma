@@ -1,0 +1,52 @@
+// Prisma schema for WhatsApp Sticker Studio
+// Optimized for Prisma Postgres on Vercel & Standard PostgreSQL
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  username     String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  stickerPacks StickerPack[]
+
+  @@map("users")
+}
+
+model StickerPack {
+  id            String    @id @default(cuid())
+  title         String
+  publisher     String?
+  trayIconUrl   String
+  isPublic      Boolean   @default(true)
+  isPublished   Boolean   @default(true)
+  downloadCount Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  authorId      String
+  author        User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  stickers      Sticker[]
+
+  @@map("sticker_packs")
+}
+
+model Sticker {
+  id        String      @id @default(cuid())
+  imageUrl  String
+  order     Int         @default(1)
+  emojis    String[]    @default([])
+  createdAt DateTime    @default(now())
+  packId    String
+  pack      StickerPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+
+  @@map("stickers")
+}
