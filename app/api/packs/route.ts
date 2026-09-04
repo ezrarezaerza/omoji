@@ -1,7 +1,6 @@
 import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { getOrCreateSessionUser } from "@/lib/get-user-session";
-import { memoryPacks } from "@/lib/memory-store";
 
 const jsonResponse = (
   data: any,
@@ -69,9 +68,11 @@ export async function GET(req: Request) {
 
     return jsonResponse({ packs });
   } catch (error: any) {
-    console.warn("Prisma packs query unavailable, falling back to memory store:", error?.message);
-    const fallbackPacks = Array.from(memoryPacks.values());
-    return jsonResponse({ packs: fallbackPacks });
+    console.error("Error fetching packs:", error);
+    return jsonResponse(
+      { error: "Failed to fetch sticker packs.", details: error?.message },
+      { status: 500 }
+    );
   }
 }
 

@@ -1,6 +1,5 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { memoryUsers } from "@/lib/memory-store";
 
 // Next.js App Router compatible JSON response helper
 const jsonResponse = (data: any, init?: { status?: number; headers?: Record<string, string> }) => {
@@ -44,23 +43,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Check if email or username is already taken in memory fallback
-    for (const memUser of memoryUsers.values()) {
-      if (memUser.email === cleanEmail) {
-        return jsonResponse(
-          { error: "An account with this email already exists." },
-          { status: 409 }
-        );
-      }
-      if (memUser.username === cleanUsername) {
-        return jsonResponse(
-          { error: "This username is already claimed." },
-          { status: 409 }
-        );
-      }
-    }
-
-    // Check if email or username is already taken in Prisma
+    // Check if email or username is already taken
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
@@ -90,7 +73,7 @@ export async function POST(req: Request) {
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    let newUser: { id: string; email: string; username: string; createdAt: Date };
+    let newUser;
     try {
       // Create the new User in PostgreSQL via Prisma
       newUser = await prisma.user.create({
@@ -109,17 +92,11 @@ export async function POST(req: Request) {
           { status: 409 }
         );
       }
-      console.warn("Prisma user creation unavailable, falling back to memory store:", createErr?.message);
-      const fallbackId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const memUser = {
-        id: fallbackId,
-        email: cleanEmail,
-        username: cleanUsername,
-        passwordHash,
-        createdAt: new Date(),
-      };
-      memoryUsers.set(fallbackId, memUser);
-      newUser = memUser;
+      console.error("Prisma user creation error in register:", createErr);
+      return jsonResponse(
+        { error: "Could not create user account. Please check your details and try again." },
+        { status: 500 }
+      );
     }
 
     return jsonResponse(

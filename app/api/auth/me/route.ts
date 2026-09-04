@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/prisma";
-import { memoryUsers } from "@/lib/memory-store";
 
 const jsonResponse = (data: any, init?: { status?: number; headers?: Record<string, string> }) => {
   return new Response(JSON.stringify(data), {
@@ -25,7 +24,7 @@ export async function GET(req: Request) {
       return jsonResponse({ error: "Unauthorized" }, { status: 401 });
     }
 
-    let user = await prisma.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -34,16 +33,6 @@ export async function GET(req: Request) {
         createdAt: true,
       },
     }).catch(() => null);
-
-    if (!user && memoryUsers.has(userId)) {
-      const mem = memoryUsers.get(userId)!;
-      user = {
-        id: mem.id,
-        email: mem.email,
-        username: mem.username,
-        createdAt: mem.createdAt,
-      };
-    }
 
     if (!user) {
       return jsonResponse({ error: "User session not found" }, { status: 404 });
