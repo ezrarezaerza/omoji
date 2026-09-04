@@ -14,7 +14,7 @@ const jsonResponse = (data: any, init?: { status?: number; headers?: Record<stri
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const { email, username, password } = body;
 
     // Validate presence of required fields
