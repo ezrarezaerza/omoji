@@ -183,4 +183,9 @@ export function createExpressApp(): express.Express {
   return app;
 }
 
-export default createExpressApp;
+const app = createExpressApp();
+
+export { app };
+export default function handler(req: any, res: any) {
+  return app(req, res);
+}
