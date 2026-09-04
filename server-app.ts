@@ -17,30 +17,43 @@ import { POST as postLogin } from "./app/api/auth/login/route";
 import { GET as getMe } from "./app/api/auth/me/route";
 import { GET as getNextAuth, POST as postNextAuth } from "./app/api/auth/[...nextauth]/route";
 
-// Helper to adapt standard Web Request/Response route handlers to Express
+// Helper to adapt standard Web Request/Response route handlers to Express / Vercel Serverless
 export async function adaptWebHandler(
   handler: (req: Request) => Promise<Response>,
   req: express.Request,
   res: express.Response
 ) {
   try {
-    const protocol = req.protocol || "http";
-    const host = req.get("host") || "localhost:3000";
-    const fullUrl = `${protocol}://${host}${req.originalUrl || req.url}`;
+    // Safely extract protocol without accessing req.protocol or req.secure (which inspect req.connection.encrypted, undefined in serverless)
+    let protocol = "https";
+    if (req.headers && req.headers["x-forwarded-proto"]) {
+      const xfp = req.headers["x-forwarded-proto"];
+      protocol = Array.isArray(xfp) ? xfp[0] : xfp.split(",")[0].trim();
+    } else if (req.socket && (req.socket as any).encrypted) {
+      protocol = "https";
+    } else {
+      protocol = "http";
+    }
+
+    const host = (req.headers && req.headers.host) || "localhost:3000";
+    const rawUrl = req.originalUrl || req.url || "/";
+    const fullUrl = `${protocol}://${host}${rawUrl}`;
 
     const headers = new Headers();
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (value) {
-        if (Array.isArray(value)) {
-          for (const v of value) headers.append(key, v);
-        } else {
-          headers.set(key, value);
+    if (req.headers) {
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (value !== undefined && value !== null) {
+          if (Array.isArray(value)) {
+            for (const v of value) headers.append(key, v);
+          } else {
+            headers.set(key, value);
+          }
         }
       }
     }
 
     const init: RequestInit & { duplex?: string } = {
-      method: req.method,
+      method: req.method || "GET",
       headers,
     };
 
@@ -90,7 +103,7 @@ export function createExpressApp(): express.Express {
     next();
   });
 
-  // Create an API router so routes work whether accessed with /api prefix or without (Vercel rewrite robustness)
+  // Create an API router so routes work whether accessed with /api prefix or without
   const apiRouter = express.Router();
 
   apiRouter.get("/health", (_req, res) => {
@@ -163,7 +176,7 @@ export function createExpressApp(): express.Express {
     return adaptWebHandler(postNextAuth, req, res);
   });
 
-  // Mount at both /api and root level to handle any Vercel URL rewrite variance
+  // Mount at both /api and root level
   app.use("/api", apiRouter);
   app.use(apiRouter);
 

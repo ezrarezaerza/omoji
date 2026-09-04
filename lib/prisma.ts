@@ -8,16 +8,24 @@ declare global {
 
 /**
  * Creates an instance of PrismaClient configured for PostgreSQL / Prisma Postgres on Vercel
- * Supports Prisma Accelerate connection strings as well as standard pooled postgresql:// URLs.
+ * Handles missing DATABASE_URL gracefully so serverless functions do not throw unhandled initialization exceptions.
  */
 function createPrismaClient(): PrismaClient {
   const databaseUrl = process.env.DATABASE_URL;
+
+  if (!databaseUrl || !databaseUrl.trim()) {
+    // Provide a placeholder datasourceUrl to prevent Prisma client from throwing at instantiation
+    return new PrismaClient({
+      datasourceUrl: "postgresql://fallback:fallback@localhost:5432/omoji?connection_limit=1",
+      log: ["error"],
+    });
+  }
 
   const basePrisma = new PrismaClient({
     log: ["error", "warn"],
   });
 
-  if (databaseUrl && (databaseUrl.startsWith("prisma://") || databaseUrl.includes("accelerate.prisma-data.net"))) {
+  if (databaseUrl.startsWith("prisma://") || databaseUrl.includes("accelerate.prisma-data.net")) {
     return (basePrisma.$extends(withAccelerate()) as unknown) as PrismaClient;
   }
 
