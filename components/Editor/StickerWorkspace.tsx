@@ -1,1068 +1,825 @@
 "use client";
 
-import React, { useState, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useState, useRef, useCallback } from "react";
 import {
-  Wand2,
+  X,
+  Image as ImageIcon,
   Type,
-  Trash2,
-  RotateCcw,
-  Sparkles,
-  Download,
+  Smile,
   Layers,
-  ArrowLeft,
-  CheckCircle2,
-  AlertTriangle,
+  Sparkles,
   Loader2,
-  Plus,
-  Package,
-  FolderArchive,
-  ImagePlus,
-  PanelRightOpen,
-  Send,
-  Flame,
-  Eraser,
-  Paintbrush,
-  MousePointer,
+  Check,
+  Shield,
+  RotateCcw,
+  FlipHorizontal,
   Sliders,
+  Palette,
+  Trash2,
+  Plus,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  ArrowRight,
+  Package,
 } from "lucide-react";
-import { Uploader } from "./Uploader";
 import { CanvasEditor, CanvasEditorHandle, TextElement } from "./CanvasEditor";
-import { EditorToolbar } from "./EditorToolbar";
-import { PackSidebar } from "./PackSidebar";
-import { ExportModal } from "./ExportModal";
-import { AnimatedPreview } from "./AnimatedPreview";
-import { exportStageToWebP } from "../../utils/exportSticker";
-import { convertToAnimatedWebp } from "../../utils/convertToAnimatedWebp";
-import { importAssetFromUrl } from "../../utils/importExternalAsset";
-import { useEditorState, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE } from "../../hooks/useEditorState";
-import { useFFmpeg } from "../../hooks/useFFmpeg";
+import { removePhotoBackground } from "../../utils/aiBackgroundRemoval";
+import { StickerPackRecord } from "../../src/types/pack";
+import { StickerDraft } from "../../utils/draftsDb";
+import { dataUrlToBlob } from "../../utils/exportSticker";
 
 export interface StickerWorkspaceProps {
   onBack?: () => void;
   onSaveToPack?: (stickerDataUrl: string) => void;
+  initialImageUrl?: string | null;
+  initialAnimatedFile?: File | null;
+  initialDraft?: StickerDraft | null;
+  activeSlotInfo?: {
+    pack: StickerPackRecord;
+    slotIndex: number;
+  } | null;
+  onCommitSlot?: (
+    slotIndex: number,
+    dataUrl: string,
+    emojis?: string[],
+    isAnimated?: boolean
+  ) => Promise<void> | void;
+  onNavigateSlot?: (slotIndex: number) => void;
+  onCommitAndAdvance?: (
+    slotIndex: number,
+    dataUrl: string,
+    emojis?: string[],
+    isAnimated?: boolean
+  ) => Promise<void> | void;
 }
 
-export function StickerWorkspace({ onBack, onSaveToPack }: StickerWorkspaceProps) {
-  const [originalImageUrl, setOriginalImageUrl] = useState<string | null>(null);
-  const [activeImageUrl, setActiveImageUrl] = useState<string | null>(null);
-  const [animatedFile, setAnimatedFile] = useState<File | null>(null);
-  const [isAiProcessing, setIsAiProcessing] = useState(false);
-  const [aiProgress, setAiProgress] = useState(0);
-  const [aiStatusText, setAiStatusText] = useState("");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+const MEME_FONTS = [
+  { name: "Impact (Meme)", value: "Impact" },
+  { name: "Comic Bold", value: "Comic Sans MS, Comic Neue, cursive" },
+  { name: "Modern Sans", value: "system-ui, -apple-system, sans-serif" },
+  { name: "Heavy Serif", value: "Georgia, serif" },
+];
 
-  // Phase 7.2: Client-side FFmpeg WebAssembly Hook & State
-  const { ffmpeg, isReady: isFFmpegReady, loadFFmpeg } = useFFmpeg(false);
-  const [isConvertingAnimated, setIsConvertingAnimated] = useState(false);
-  const [animatedProgress, setAnimatedProgress] = useState(0);
-  const [animatedStatusText, setAnimatedStatusText] = useState("Preparing WebAssembly engine...");
+const COLOR_PRESETS = [
+  "#ffffff",
+  "#000000",
+  "#facc15",
+  "#ef4444",
+  "#22c55e",
+  "#3b82f6",
+  "#a855f7",
+  "#ec4899",
+];
 
-  // Phase 6.1: Editor Tool State Hook (Active Tool & Brush Size)
-  const { activeTool, brushSize, setActiveTool, setBrushSize, toggleTool, isDrawingMode } = useEditorState("SELECT", 20);
+// Curated WhatsApp Emoji & Accessory Stamp Categories
+const EMOJI_CATEGORIES = [
+  {
+    id: "reactions",
+    label: "Reactions",
+    items: ["😂", "🔥", "😎", "❤️", "✨", "💀", "👀", "💯", "👏", "⚡", "🚀", "🎉", "😍", "🥳", "🥺", "🤯", "🤡", "😴"],
+  },
+  {
+    id: "accessories",
+    label: "Props & Stamps",
+    items: ["🕶️", "👑", "🧢", "🎩", "⭐", "💫", "💥", "💢", "💎", "🎀", "🎯", "🥇", "🍕", "🍔", "☕", "🍺", "💸", "💰"],
+  },
+  {
+    id: "memes",
+    label: "Meme Moods",
+    items: ["🐸", "🗿", "🐕", "🐱", "💅", "🤫", "🍿", "👀", "🤦‍♂️", "🤷‍♀️", "🔥", "💀", "🛑", "⚠️", "❌", "✔️", "🆗", "🆒"],
+  },
+];
 
-  // Pack collection state
-  const [packName, setPackName] = useState("My Awesome Stickers");
-  const [authorName, setAuthorName] = useState("Sticker Creator");
-  const [packStickers, setPackStickers] = useState<string[]>([]);
-
-  // Canvas elements state
-  const [textElements, setTextElements] = useState<TextElement[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  // Active text styling & color picker state
-  const [textColor, setTextColor] = useState("#ffffff");
-  const [strokeColor, setStrokeColor] = useState("#000000");
-  const [strokeWidth, setStrokeWidth] = useState(8);
-  const [colorMode, setColorMode] = useState<"fill" | "stroke">("fill");
-
-  // UI Overlays state
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [isIngestingAsset, setIsIngestingAsset] = useState(false);
-  const [ingestStatusText, setIngestStatusText] = useState("Fetching and preparing asset...");
-
+export function StickerWorkspace({
+  onBack,
+  onSaveToPack,
+  initialImageUrl,
+  activeSlotInfo,
+  onCommitSlot,
+  onNavigateSlot,
+  onCommitAndAdvance,
+}: StickerWorkspaceProps) {
   const canvasRef = useRef<CanvasEditorHandle>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageSelected = (url: string) => {
-    setOriginalImageUrl(url);
-    setActiveImageUrl(url);
-    setAnimatedFile(null);
-    setTextElements([]);
-    setSelectedId(null);
-    setErrorMessage(null);
-    setSuccessMessage(null);
+  // Core Image State (Original vs Cutout)
+  const [originalImageUrl, setOriginalImageUrl] = useState<string | null>(
+    initialImageUrl || null
+  );
+  const [cutoutImageUrl, setCutoutImageUrl] = useState<string | null>(null);
+  const [activeImageMode, setActiveImageMode] = useState<"cutout" | "original">(
+    "original"
+  );
+
+  // Outline / Border State (WhatsApp Sticker die-cut)
+  const [strokeWidth, setStrokeWidth] = useState<number>(0);
+  const [strokeColor, setStrokeColor] = useState<string>("#ffffff");
+
+  // UI State
+  const [isRemovingBg, setIsRemovingBg] = useState(false);
+  const [bgRemovalProgress, setBgRemovalProgress] = useState<string>("");
+  const [selectedId, setSelectedId] = useState<string | null>("subject-image");
+  const [activeTab, setActiveTab] = useState<
+    "gallery" | "text" | "emoji" | "background" | null
+  >(null);
+  const [emojiCategory, setEmojiCategory] = useState<string>("reactions");
+  const [textElements, setTextElements] = useState<TextElement[]>([]);
+  const [showSafeZone, setShowSafeZone] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [associatedEmojis, setAssociatedEmojis] = useState<string[]>(["✨"]);
+
+  // Selected element helpers
+  const selectedText = textElements.find((t) => t.id === selectedId);
+  const isSelectedEmoji = selectedText && selectedText.id.startsWith("emoji-");
+
+  // Active displayed image URL (cutout or original)
+  const currentDisplayUrl =
+    activeImageMode === "cutout" && cutoutImageUrl
+      ? cutoutImageUrl
+      : originalImageUrl;
+
+  // Handle Photo Selection: DO NOT AUTO-CUTOUT! User decides explicitly.
+  const handleSelectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const url = event.target?.result as string;
+      setOriginalImageUrl(url);
+      setCutoutImageUrl(null);
+      setActiveImageMode("original");
+      setSelectedId("subject-image");
+      setActiveTab("background");
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
-  const handleAnimatedFileSelected = (file: File) => {
-    setAnimatedFile(file);
-    setOriginalImageUrl(null);
-    setActiveImageUrl(null);
-    setTextElements([]);
-    setSelectedId(null);
-    setErrorMessage(null);
-  };
-
-  const handleIngestAssetFromUrl = async (url: string) => {
-    setIsIngestingAsset(true);
-    setIngestStatusText("Fetching asset through CORS proxy...");
-    setErrorMessage(null);
+  // Trigger AI Background Removal (User Clicked Explicitly)
+  const triggerAiCutout = async () => {
+    if (!originalImageUrl) return;
 
     try {
-      const file = await importAssetFromUrl(url);
-      const mime = file.type.toLowerCase();
-      const isAnimated =
-        mime.includes("gif") ||
-        mime.includes("mp4") ||
-        file.name.toLowerCase().endsWith(".gif") ||
-        file.name.toLowerCase().endsWith(".mp4");
+      setIsRemovingBg(true);
+      setBgRemovalProgress("Segmenting subject...");
 
-      if (isAnimated) {
-        setIngestStatusText("Routing to automated 6-second animated pipeline...");
-        handleAnimatedFileSelected(file);
-      } else {
-        setIngestStatusText("Setting up 512×512 sticker canvas...");
-        const previewUrl = URL.createObjectURL(file);
-        handleImageSelected(previewUrl);
+      const cutout = await removePhotoBackground(originalImageUrl, (p) => {
+        setBgRemovalProgress(p.message || "AI isolating subject...");
+      });
+
+      setCutoutImageUrl(cutout);
+      setActiveImageMode("cutout");
+      setSelectedId("subject-image");
+      if (strokeWidth === 0) {
+        setStrokeWidth(8);
       }
-    } catch (err: any) {
-      console.error("Asset ingestion failed:", err);
-      setErrorMessage(err?.message || "Failed to import asset. Please check the URL or try another meme.");
+    } catch (err) {
+      console.error("AI cutout failed:", err);
     } finally {
-      setIsIngestingAsset(false);
+      setIsRemovingBg(false);
+      setBgRemovalProgress("");
     }
   };
 
-  const handleSkipAnimatedConversion = (file: File) => {
-    const fallbackUrl = URL.createObjectURL(file);
-    setPackStickers((prev) => {
-      if (prev.length >= 30) {
-        setErrorMessage("WhatsApp sticker packs hold a maximum of 30 stickers.");
-        return prev;
-      }
-      return [...prev, fallbackUrl];
-    });
-    setSuccessMessage("Animated sticker added to your pack!");
-    setAnimatedFile(null);
-    setIsConvertingAnimated(false);
-    setAnimatedProgress(0);
-    setTimeout(() => setSuccessMessage(null), 3500);
+  // 1-Tap Direct WebP Download (Offline / Direct Sticker Save)
+  const handleDownloadDirectWebp = () => {
+    if (!canvasRef.current) return;
+    try {
+      const dataUrl = canvasRef.current.exportImage();
+      if (!dataUrl) return;
+
+      const link = document.createElement("a");
+      const filename = `whatsapp_sticker_${Date.now()}.webp`;
+      link.download = filename;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error("Direct WebP download failed:", err);
+    }
   };
 
-  const handleConvertAnimatedSticker = async (file: File) => {
-    setIsConvertingAnimated(true);
-    setAnimatedProgress(10);
-    setAnimatedStatusText("Preparing WhatsApp-compatible format...");
-    setErrorMessage(null);
-
-    // Hard fallback timeout: 8 seconds maximum total wait
-    const safetyTimeout = setTimeout(() => {
-      console.warn("Safety timeout reached in handleConvertAnimatedSticker. Adding sticker directly.");
-      handleSkipAnimatedConversion(file);
-    }, 8000);
+  // Handle Save (WYSIWYG 512x512 WebP Export to Slot)
+  const handleSave = async (advance: boolean = false) => {
+    if (!canvasRef.current) return;
+    setIsSaving(true);
 
     try {
-      let engine = ffmpeg;
-      if (!engine || !isFFmpegReady) {
-        setAnimatedStatusText("Checking WebAssembly encoder (fast check)...");
-        engine = await loadFFmpeg(4000);
-      }
+      const dataUrl = canvasRef.current.exportImage();
+      if (!dataUrl) return;
 
-      setAnimatedProgress(25);
-      setAnimatedStatusText("Formatting 512×512 square loop...");
+      const emojisToSave = associatedEmojis.length > 0 ? associatedEmojis : ["✨"];
 
-      const webpBlob = await convertToAnimatedWebp(file, engine, {
-        maxDurationSeconds: 6,
-        fps: 12,
-        quality: 50,
-        targetSize: 512,
-        timeoutMs: 6000,
-        onProgress: (p) => {
-          setAnimatedProgress(Math.max(25, Math.min(95, p)));
-          setAnimatedStatusText(`Formatting sticker (${p}%)...`);
-        },
-      });
-
-      clearTimeout(safetyTimeout);
-      setAnimatedProgress(100);
-      setAnimatedStatusText("Finalizing sticker...");
-
-      const blobUrl = URL.createObjectURL(webpBlob);
-
-      setPackStickers((prev) => {
-        if (prev.length >= 30) {
-          setErrorMessage("WhatsApp sticker packs hold a maximum of 30 stickers.");
-          return prev;
+      if (activeSlotInfo) {
+        if (advance && onCommitAndAdvance) {
+          await onCommitAndAdvance(activeSlotInfo.slotIndex, dataUrl, emojisToSave, false);
+          return;
+        } else if (onCommitSlot) {
+          await onCommitSlot(activeSlotInfo.slotIndex, dataUrl, emojisToSave, false);
         }
-        return [...prev, blobUrl];
-      });
-
-      setSuccessMessage("Animated sticker added to your pack!");
-      setAnimatedFile(null);
-      setTimeout(() => setSuccessMessage(null), 3500);
-    } catch (err: any) {
-      clearTimeout(safetyTimeout);
-      console.warn("Animated conversion encountered fallback:", err);
-      handleSkipAnimatedConversion(file);
-    } finally {
-      clearTimeout(safetyTimeout);
-      setIsConvertingAnimated(false);
-      setAnimatedProgress(0);
-    }
-  };
-
-  const handleResetImage = () => {
-    if (originalImageUrl) {
-      setActiveImageUrl(originalImageUrl);
-      setTextElements([]);
-      setSelectedId(null);
-      setSuccessMessage("Canvas reset to original photo.");
-      setTimeout(() => setSuccessMessage(null), 3000);
-    }
-  };
-
-  // AI Background Removal Engine
-  const handleRemoveBackground = async () => {
-    if (!activeImageUrl) return;
-
-    setIsAiProcessing(true);
-    setAiProgress(10);
-    setAiStatusText("Detecting photo subject...");
-    setErrorMessage(null);
-
-    try {
-      setAiProgress(30);
-      setAiStatusText("Separating foreground...");
-      
-      let processedBlobUrl: string | null = null;
-
-      await new Promise((r) => setTimeout(r, 400));
-      setAiProgress(55);
-      setAiStatusText("Cleaning up background...");
-
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = activeImageUrl;
-      await new Promise((res, rej) => {
-        img.onload = res;
-        img.onerror = rej;
-      });
-
-      setAiProgress(80);
-      setAiStatusText("Smoothing edges...");
-
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = img.width;
-      tempCanvas.height = img.height;
-      const ctx = tempCanvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        const imgData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-        const d = imgData.data;
-
-        // Sample boundary pixels to detect background chroma
-        const cornerSamples = [
-          [0, 0],
-          [tempCanvas.width - 1, 0],
-          [0, tempCanvas.height - 1],
-          [tempCanvas.width - 1, tempCanvas.height - 1],
-        ];
-
-        let totalR = 0, totalG = 0, totalB = 0;
-        cornerSamples.forEach(([cx, cy]) => {
-          const idx = (cy * tempCanvas.width + cx) * 4;
-          totalR += d[idx];
-          totalG += d[idx + 1];
-          totalB += d[idx + 2];
-        });
-
-        const bgR = totalR / cornerSamples.length;
-        const bgG = totalG / cornerSamples.length;
-        const bgB = totalB / cornerSamples.length;
-
-        for (let i = 0; i < d.length; i += 4) {
-          const r = d[i];
-          const g = d[i + 1];
-          const b = d[i + 2];
-          const dist = Math.sqrt(
-            Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2)
-          );
-
-          if (dist < 40) {
-            d[i + 3] = 0; // Transparent
-          } else if (dist < 70) {
-            d[i + 3] = Math.round(((dist - 40) / 30) * 255); // Smooth feather
-          }
-        }
-
-        ctx.putImageData(imgData, 0, 0);
-        processedBlobUrl = tempCanvas.toDataURL("image/png");
+      } else if (onSaveToPack) {
+        onSaveToPack(dataUrl);
       }
 
-      setAiProgress(100);
-      setAiStatusText("Background removed successfully!");
-
-      if (processedBlobUrl) {
-        setActiveImageUrl(processedBlobUrl);
-        setSuccessMessage("✨ Subject isolated! Background removed cleanly.");
-      }
-    } catch (err: any) {
-      console.error("AI Background Removal error:", err);
-      setErrorMessage(
-        "Could not remove background automatically. You can continue editing or try another photo."
-      );
+      onBack?.();
+    } catch (err) {
+      console.error("Failed to export sticker:", err);
     } finally {
-      setTimeout(() => {
-        setIsAiProcessing(false);
-        setAiProgress(0);
-      }, 500);
+      setIsSaving(false);
     }
   };
 
-  // Add Text Sticker Element
+  // Handle Adding Text with Classic Meme Styling
   const handleAddText = () => {
-    const newId = `text_${Date.now()}`;
     const newText: TextElement = {
-      id: newId,
-      text: "COOL STICKER!",
-      x: 140,
-      y: 220,
-      fontSize: 36,
-      fill: textColor,
-      stroke: strokeColor,
-      strokeWidth: strokeWidth,
-      rotation: 0,
+      id: `text-${Date.now()}`,
+      text: textElements.filter((t) => !t.id.startsWith("emoji-")).length === 0 ? "TOP TEXT" : "BOTTOM TEXT",
+      x: 100,
+      y: textElements.filter((t) => !t.id.startsWith("emoji-")).length === 0 ? 50 : 400,
+      fontSize: 40,
+      fontFamily: "Impact",
+      fill: "#ffffff",
+      stroke: "#000000",
+      strokeWidth: 4,
     };
     setTextElements((prev) => [...prev, newText]);
-    setSelectedId(newId);
+    setSelectedId(newText.id);
+    setActiveTab("text");
   };
 
-  const handleUpdateText = (id: string, newAttrs: Partial<TextElement>) => {
+  // Handle Updating Selected Element (Text or Stamp)
+  const updateSelectedElement = (attrs: Partial<TextElement>) => {
+    if (!selectedId) return;
     setTextElements((prev) =>
-      prev.map((el) => (el.id === id ? { ...el, ...newAttrs } : el))
+      prev.map((t) => (t.id === selectedId ? { ...t, ...attrs } : t))
     );
   };
 
-  const handleDeleteSelected = () => {
-    if (!selectedId) return;
-    if (selectedId === "main-sticker-image") {
-      setActiveImageUrl(null);
-      setOriginalImageUrl(null);
-      setSelectedId(null);
-    } else {
-      setTextElements((prev) => prev.filter((el) => el.id !== selectedId));
-      setSelectedId(null);
-    }
+  // Handle Removing Selected Element
+  const handleDeleteSelectedElement = () => {
+    if (!selectedId || selectedId === "subject-image") return;
+    setTextElements((prev) => prev.filter((t) => t.id !== selectedId));
+    setSelectedId("subject-image");
   };
 
-  // Palette Color Selection Handler
-  const handleColorSelected = (color: string) => {
-    if (colorMode === "fill") {
-      setTextColor(color);
-      if (selectedId && selectedId !== "main-sticker-image") {
-        handleUpdateText(selectedId, { fill: color });
-      }
-    } else {
-      setStrokeColor(color);
-      if (selectedId && selectedId !== "main-sticker-image") {
-        handleUpdateText(selectedId, { stroke: color });
-      }
-    }
+  // Handle Adding Emoji / Accessory Stamp
+  const handleAddEmojiStamp = (emojiChar: string) => {
+    const newStamp: TextElement = {
+      id: `emoji-${Date.now()}`,
+      text: emojiChar,
+      x: 230,
+      y: 230,
+      fontSize: 64,
+      fill: "#ffffff",
+      stroke: "transparent",
+      strokeWidth: 0,
+    };
+    setTextElements((prev) => [...prev, newStamp]);
+    setSelectedId(newStamp.id);
+
+    // Also track for WhatsApp sticker emoji association (up to 3)
+    setAssociatedEmojis((prev) => {
+      if (prev.includes(emojiChar)) return prev;
+      return [emojiChar, ...prev].slice(0, 3);
+    });
   };
-
-  // Add Current Canvas to the Pack
-  const handleAddStickerToPack = () => {
-    if (!canvasRef.current) return;
-    const dataUrl = canvasRef.current.exportImage();
-    if (dataUrl) {
-      if (packStickers.length >= 30) {
-        setErrorMessage("WhatsApp sticker packs support up to 30 stickers maximum.");
-        return;
-      }
-      setPackStickers((prev) => [...prev, dataUrl]);
-      setSuccessMessage(`Added sticker #${packStickers.length + 1} to pack!`);
-      setTimeout(() => setSuccessMessage(null), 3000);
-      if (onSaveToPack) {
-        onSaveToPack(dataUrl);
-      }
-    }
-  };
-
-  // Single Sticker Direct WebP Export
-  const handleExportSingleSticker = async () => {
-    if (!canvasRef.current?.stageRef) {
-      if (canvasRef.current) {
-        const dataUrl = canvasRef.current.exportImage();
-        if (dataUrl) {
-          const link = document.createElement("a");
-          link.download = `sticker-${Date.now()}.webp`;
-          link.href = dataUrl;
-          link.click();
-          setSuccessMessage("🎉 512×512 WebP sticker downloaded!");
-        }
-      }
-      return;
-    }
-
-    try {
-      const res = await exportStageToWebP(canvasRef.current.stageRef, 0.85);
-      if (res) {
-        const url = URL.createObjectURL(res.blob);
-        const link = document.createElement("a");
-        link.download = `sticker-${Date.now()}.webp`;
-        link.href = url;
-        link.click();
-        URL.revokeObjectURL(url);
-        setSuccessMessage("🎉 512×512 WebP sticker exported successfully!");
-      }
-    } catch (e) {
-      console.error(e);
-      setErrorMessage("Failed to export WebP sticker.");
-    }
-  };
-
-  const handleRemoveStickerFromPack = (index: number) => {
-    setPackStickers((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const selectedTextElement = textElements.find((t) => t.id === selectedId);
-
-  // Active stickers for packaging: either the collected pack or current canvas if pack is empty
-  const currentStickersForExport =
-    packStickers.length > 0
-      ? packStickers
-      : activeImageUrl && canvasRef.current?.exportImage()
-      ? [canvasRef.current.exportImage()!]
-      : [];
 
   return (
-    <div className="w-full flex flex-col gap-6 relative">
-      {/* Workspace Top Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/5 text-zinc-300 transition hover:bg-white/15 hover:text-white"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          )}
-          <div>
-            <h2 className="text-xl font-extrabold tracking-tight text-white font-['Space_Grotesk']">
-              Omoji Sticker Studio
-            </h2>
-            <p className="text-xs text-zinc-400">
-              Create and customize WhatsApp stickers with instant cutouts, captions, and easy pack exports
-            </p>
+    <div
+      id="stickerly-full-screen-shell"
+      className="fixed inset-0 z-50 bg-[#000000] text-white flex flex-col justify-between select-none overflow-hidden touch-none"
+    >
+      {/* Hidden File Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleSelectFile}
+      />
+
+      {/* TOP BAR: Minimalist [X] Cancel, Slot Navigation, Quick Transform & [Save] */}
+      <div className="relative z-20 flex items-center justify-between px-3 pt-3 pb-2 w-full max-w-lg mx-auto">
+        {/* Close / Back Button */}
+        <button
+          id="btn-close-canvas"
+          onClick={onBack}
+          className="w-9 h-9 rounded-full bg-white/10 active:scale-95 flex items-center justify-center text-white backdrop-blur-md transition-transform"
+          aria-label="Close Editor"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        {/* Slot Info & Quick Stepper if editing a pack slot */}
+        {activeSlotInfo && (
+          <div className="flex items-center gap-1 bg-white/10 border border-white/10 rounded-full px-2.5 py-1 text-xs font-bold backdrop-blur-md">
+            {onNavigateSlot && activeSlotInfo.slotIndex > 0 && (
+              <button
+                onClick={() => onNavigateSlot(activeSlotInfo.slotIndex - 1)}
+                className="p-1 hover:text-blue-400 active:scale-90 transition-transform"
+                title="Previous Slot"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <span className="text-white/90 px-1">Slot #{activeSlotInfo.slotIndex + 1}</span>
+            {onNavigateSlot && activeSlotInfo.slotIndex < 29 && (
+              <button
+                onClick={() => onNavigateSlot(activeSlotInfo.slotIndex + 1)}
+                className="p-1 hover:text-blue-400 active:scale-90 transition-transform"
+                title="Next Slot"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
-        </div>
+        )}
 
-        {/* Global Action Header Controls */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Active Pack Sidebar Drawer Toggle */}
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen(true)}
-            className="inline-flex items-center gap-2 rounded-2xl border border-purple-500/30 bg-purple-500/15 px-3.5 py-2 text-xs font-bold text-purple-200 transition hover:bg-purple-500/25 active:scale-95 shadow-sm"
-          >
-            <Package className="h-4 w-4 text-purple-400" />
-            <span>My Pack ({packStickers.length}/30)</span>
-          </button>
-
-          {activeImageUrl && (
-            <button
-              type="button"
-              onClick={handleExportSingleSticker}
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-white/15 active:scale-95"
-            >
-              <Download className="h-4 w-4 text-orange-400" />
-              <span>Save Sticker</span>
-            </button>
+        {/* Quick Transform & Action Tools */}
+        <div className="flex items-center gap-1.5">
+          {currentDisplayUrl && (
+            <div className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-white/10 border border-white/10 backdrop-blur-md">
+              <button
+                onClick={() => canvasRef.current?.flipHorizontal()}
+                title="Flip Horizontal"
+                className="p-1.5 rounded-full hover:bg-white/20 active:scale-90 text-white/80 hover:text-white transition-all"
+              >
+                <FlipHorizontal className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => canvasRef.current?.fitAndCenterImage()}
+                title="Center & Fit"
+                className="p-1.5 rounded-full hover:bg-white/20 active:scale-90 text-white/80 hover:text-white transition-all"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={handleDownloadDirectWebp}
+                title="1-Tap Direct WebP Download (512x512)"
+                className="p-1.5 rounded-full hover:bg-white/20 active:scale-90 text-white/80 hover:text-emerald-400 transition-all"
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
+            </div>
           )}
 
-          {/* Finalize Pack CTA */}
-          <button
-            type="button"
-            onClick={() => setIsExportModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 px-4 py-2 text-xs font-extrabold text-white shadow-lg shadow-green-600/25 transition-transform hover:scale-105 active:scale-95"
-          >
-            <FolderArchive className="h-4 w-4" />
-            <span>Export Pack</span>
-          </button>
+          {/* Primary Save Button (Save Slot or Save & Next) */}
+          <div className="flex items-center gap-1">
+            <button
+              id="btn-save-canvas"
+              onClick={() => handleSave(false)}
+              disabled={isSaving || isRemovingBg || !currentDisplayUrl}
+              className="px-4 py-2 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-95 font-bold text-xs sm:text-sm text-white shadow-lg shadow-blue-500/30 flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:pointer-events-none"
+            >
+              {isSaving ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
+              )}
+              <span>Save</span>
+            </button>
+
+            {activeSlotInfo && onCommitAndAdvance && activeSlotInfo.slotIndex < 29 && (
+              <button
+                onClick={() => handleSave(true)}
+                disabled={isSaving || isRemovingBg || !currentDisplayUrl}
+                title="Save and advance to next slot"
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 text-white/80 hover:text-white backdrop-blur-md transition-all disabled:opacity-50"
+              >
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Main Studio Bento Grid Layout */}
-      {animatedFile ? (
-        <AnimatedPreview
-          file={animatedFile}
-          onConvertToSticker={handleConvertAnimatedSticker}
-          onSkipAndAddDirectly={handleSkipAnimatedConversion}
-          onCancel={() => {
-            setAnimatedFile(null);
-            setIsConvertingAnimated(false);
-            setAnimatedProgress(0);
-          }}
-          isConverting={isConvertingAnimated}
-          conversionProgress={animatedProgress}
-          conversionStatusText={animatedStatusText}
-        />
-      ) : !activeImageUrl ? (
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-3xl border-2 border-white/15 bg-white/[0.06] p-6 sm:p-10 backdrop-blur-2xl"
-        >
-          <Uploader
-            onImageSelected={handleImageSelected}
-            onAnimatedFileSelected={handleAnimatedFileSelected}
-            onAssetUrlSelected={handleIngestAssetFromUrl}
-          />
-        </motion.div>
-      ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          {/* Left Column: Canvas Stage & Floating Overlays (7 Cols) */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="relative flex flex-col items-center justify-center rounded-3xl border-2 border-white/15 bg-white/[0.06] p-4 sm:p-6 backdrop-blur-2xl lg:col-span-7 overflow-hidden"
+      {/* CENTER: Clean 1:1 Stage Viewport */}
+      <div className="relative flex-1 w-full max-w-lg mx-auto flex items-center justify-center p-3">
+        {/* If no image loaded yet, prompt to upload */}
+        {!currentDisplayUrl ? (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full aspect-square max-w-[420px] rounded-3xl border-2 border-dashed border-white/20 bg-white/[0.03] hover:bg-white/[0.06] flex flex-col items-center justify-center gap-4 cursor-pointer transition-colors"
           >
-            {/* FLOATING EDITOR TOOLBAR OVER CANVAS */}
-            <EditorToolbar
-              onRemoveBackground={handleRemoveBackground}
-              onAddText={handleAddText}
-              onResetCanvas={handleResetImage}
-              isAiProcessing={isAiProcessing}
-              hasImage={!!activeImageUrl}
-              selectedColor={colorMode === "fill" ? textColor : strokeColor}
-              onSelectColor={handleColorSelected}
-              activeColorMode={colorMode}
-              onToggleColorMode={() =>
-                setColorMode((prev) => (prev === "fill" ? "stroke" : "fill"))
-              }
-              activeTool={activeTool}
-              onSelectTool={setActiveTool}
-              brushSize={brushSize}
-              onBrushSizeChange={setBrushSize}
+            <div className="w-16 h-16 rounded-2xl bg-blue-600/20 text-blue-400 flex items-center justify-center">
+              <ImageIcon className="w-8 h-8" />
+            </div>
+            <div className="text-center">
+              <p className="font-bold text-base text-white">Choose a Photo</p>
+              <p className="text-xs text-white/50 mt-1">
+                Tap to pick from gallery or files
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="relative w-full aspect-square max-w-[460px] flex items-center justify-center">
+            {/* Konva 512x512 Canvas Component */}
+            <CanvasEditor
+              ref={canvasRef}
+              imageUrl={currentDisplayUrl}
+              textElements={textElements}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              showSafeZone={showSafeZone}
+              strokeWidth={strokeWidth}
+              strokeColor={strokeColor}
+              onEditTextInline={(id) => {
+                setSelectedId(id);
+                if (id.startsWith("emoji-")) {
+                  setActiveTab("emoji");
+                } else {
+                  setActiveTab("text");
+                }
+              }}
+              onUpdateText={(id, attrs) => {
+                setTextElements((prev) =>
+                  prev.map((t) => (t.id === id ? { ...t, ...attrs } : t))
+                );
+              }}
             />
 
-            {/* Konva Stage */}
-            <div className="mt-14 sm:mt-16 mb-2">
-              <CanvasEditor
-                ref={canvasRef}
-                imageUrl={activeImageUrl}
-                originalImageUrl={originalImageUrl}
-                textElements={textElements}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                onUpdateText={handleUpdateText}
-                activeTool={activeTool}
-                brushSize={brushSize}
-                onImageModified={(newDataUrl) => setActiveImageUrl(newDataUrl)}
-              />
-            </div>
+            {/* AI Background Removal Overlay Spinner */}
+            {isRemovingBg && (
+              <div className="absolute inset-0 z-30 rounded-2xl bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="w-12 h-12 rounded-full bg-blue-600/20 text-blue-400 flex items-center justify-center animate-pulse">
+                  <Sparkles className="w-6 h-6 animate-spin" />
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-white">
+                    AI Isolating Subject
+                  </p>
+                  <p className="text-xs text-white/60 mt-1">
+                    {bgRemovalProgress || "Analyzing subject edges..."}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
-            {/* Canvas Actions Bar */}
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-              <button
-                id="add-to-pack-btn"
-                type="button"
-                onClick={handleAddStickerToPack}
-                className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-2.5 text-xs font-bold text-zinc-950 shadow-lg shadow-orange-500/25 transition-transform hover:scale-105 active:scale-95"
-              >
-                <Plus className="h-4 w-4" />
-                Add to Current Pack ({packStickers.length}/30)
-              </button>
-
-              <label className="cursor-pointer">
+      {/* CONTEXTUAL TOOL DRAWER: Text & Meme Typography */}
+      {activeTab === "text" && (
+        <div className="z-20 w-full max-w-lg mx-auto px-4 py-3 bg-[#121214] border-t border-white/10 flex flex-col gap-2.5 animate-in slide-in-from-bottom-2">
+          {selectedText && !isSelectedEmoji ? (
+            <>
+              {/* Row 1: Text Input + Add Another Text + Delete */}
+              <div className="flex items-center gap-2">
                 <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleImageSelected(URL.createObjectURL(f));
-                  }}
+                  type="text"
+                  value={selectedText.text}
+                  onChange={(e) => updateSelectedElement({ text: e.target.value })}
+                  placeholder="Type sticker text..."
+                  className="flex-1 bg-white/10 border border-white/15 rounded-xl px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 font-bold"
+                  autoFocus
                 />
-                <div className="inline-flex items-center gap-1.5 rounded-2xl border border-white/20 bg-white/10 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-white/15">
-                  <ImagePlus className="h-4 w-4 text-zinc-300" />
-                  New Image
-                </div>
-              </label>
-            </div>
-
-            <p className="mt-3 text-center text-xs text-zinc-400">
-              💡 Drag to move • Use corner handles to scale & rotate • Tap background to deselect
-            </p>
-          </motion.div>
-
-          {/* Right Column: Tools & Pack Settings Bento Cards (5 Cols) */}
-          <motion.div
-            initial={{ opacity: 0, x: 15 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="flex flex-col gap-4 lg:col-span-5"
-          >
-            {/* AI Background Removal Bento Card */}
-            <div className="relative overflow-hidden rounded-3xl border-2 border-orange-500/30 bg-gradient-to-br from-white/[0.1] to-white/[0.04] p-5 backdrop-blur-xl">
-              <div className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full bg-orange-500/20 blur-xl" />
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/20 text-orange-400">
-                    <Sparkles className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">Remove Background</h3>
-                    <p className="text-[11px] text-zinc-400">Isolate subjects with 1 tap</p>
-                  </div>
-                </div>
-
-                <span className="rounded-full border border-orange-500/30 bg-orange-500/20 px-2 py-0.5 text-[10px] font-bold text-orange-300">
-                  Auto Magic
-                </span>
-              </div>
-
-              {/* Progress or Trigger */}
-              {isAiProcessing ? (
-                <div className="mt-4 flex flex-col gap-2 rounded-2xl border border-orange-500/20 bg-black/40 p-4">
-                  <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="flex items-center gap-2 text-orange-300">
-                      <Loader2 className="h-4 w-4 animate-spin text-orange-400" />
-                      {aiStatusText}
-                    </span>
-                    <span className="text-white">{aiProgress}%</span>
-                  </div>
-
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-                    <motion.div
-                      className="h-full bg-gradient-to-r from-orange-500 to-amber-400"
-                      style={{ width: `${aiProgress}%` }}
-                      transition={{ ease: "easeOut", duration: 0.3 }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-4 flex gap-2">
-                  <button
-                    id="ai-remove-bg-btn"
-                    type="button"
-                    disabled={isAiProcessing}
-                    onClick={handleRemoveBackground}
-                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 py-3 text-xs font-extrabold text-zinc-950 shadow-lg shadow-orange-500/20 transition hover:opacity-95 active:scale-95"
-                  >
-                    <Wand2 className="h-4 w-4" />
-                    Remove Photo Background
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleResetImage}
-                    title="Reset to original photo"
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/15 bg-white/5 text-zinc-300 transition hover:bg-white/15 hover:text-white"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Smart Erase & Restore Drawing Tools Bento Card */}
-            <div className="rounded-3xl border-2 border-white/15 bg-white/[0.08] p-5 backdrop-blur-xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/20 text-rose-400">
-                    <Eraser className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">Smart Eraser & Restore</h3>
-                    <p className="text-[11px] text-zinc-400">Touch up edges or paint back parts</p>
-                  </div>
-                </div>
-
-                <span
-                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
-                    activeTool === "ERASE"
-                      ? "border-rose-500/40 bg-rose-500/20 text-rose-300"
-                      : activeTool === "RESTORE"
-                      ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-300"
-                      : "border-cyan-500/40 bg-cyan-500/20 text-cyan-300"
-                  }`}
-                >
-                  {activeTool === "ERASE" ? "Erasing" : activeTool === "RESTORE" ? "Restoring" : "Select Mode"}
-                </span>
-              </div>
-
-              {/* Tool Mode Selector Switch */}
-              <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-black/40 p-1.5 border border-white/10">
                 <button
-                  type="button"
-                  onClick={() => setActiveTool("SELECT")}
-                  className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition-all ${
-                    activeTool === "SELECT"
-                      ? "bg-white/20 text-white shadow-md"
-                      : "text-zinc-400 hover:text-zinc-200"
-                  }`}
+                  onClick={handleAddText}
+                  title="Add Another Text"
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white transition-colors"
                 >
-                  <MousePointer className="h-3.5 w-3.5 text-cyan-400" />
-                  <span>Select</span>
+                  <Plus className="w-4 h-4" />
                 </button>
-
                 <button
-                  type="button"
-                  onClick={() => setActiveTool("ERASE")}
-                  className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition-all ${
-                    activeTool === "ERASE"
-                      ? "bg-rose-500 text-zinc-950 shadow-[0_0_12px_rgba(244,63,94,0.5)] font-extrabold"
-                      : "text-zinc-400 hover:text-rose-300"
-                  }`}
+                  onClick={handleDeleteSelectedElement}
+                  title="Delete Text"
+                  className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 active:scale-95 transition-colors"
                 >
-                  <Eraser className="h-3.5 w-3.5" />
-                  <span>Erase</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTool("RESTORE")}
-                  className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition-all ${
-                    activeTool === "RESTORE"
-                      ? "bg-emerald-500 text-zinc-950 shadow-[0_0_12px_rgba(16,185,129,0.5)] font-extrabold"
-                      : "text-zinc-400 hover:text-emerald-300"
-                  }`}
-                >
-                  <Paintbrush className="h-3.5 w-3.5" />
-                  <span>Restore</span>
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Brush Size Adjustment */}
-              {isDrawingMode && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  className="mt-4 flex flex-col gap-2 rounded-2xl border border-white/10 bg-black/30 p-3.5"
-                >
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-zinc-300">
-                      {activeTool === "ERASE" ? "Eraser Thickness" : "Restore Brush Thickness"}
-                    </span>
-                    <span
-                      className={`font-mono font-bold ${
-                        activeTool === "ERASE" ? "text-rose-300" : "text-emerald-300"
+              {/* Row 2: Font Selection & Size Slider */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  {MEME_FONTS.map((font) => (
+                    <button
+                      key={font.value}
+                      onClick={() => updateSelectedElement({ fontFamily: font.value })}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold shrink-0 transition-colors ${
+                        (selectedText.fontFamily || "Impact") === font.value
+                          ? "bg-blue-600 text-white"
+                          : "bg-white/10 text-white/70 hover:text-white"
                       }`}
                     >
-                      {brushSize}px
-                    </span>
-                  </div>
+                      {font.name.split(" ")[0]}
+                    </button>
+                  ))}
+                </div>
 
+                {/* Size Slider */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[11px] text-white/60 font-semibold">Size</span>
                   <input
                     type="range"
-                    min={MIN_BRUSH_SIZE}
-                    max={MAX_BRUSH_SIZE}
-                    value={brushSize}
-                    onChange={(e) => setBrushSize(Number(e.target.value))}
-                    className={`h-2 w-full cursor-pointer appearance-none rounded-lg bg-zinc-800 ${
-                      activeTool === "ERASE" ? "accent-rose-500" : "accent-emerald-500"
-                    }`}
-                  />
-
-                  <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-1">
-                    <span>Precision ({MIN_BRUSH_SIZE}px)</span>
-                    <span>Broad ({MAX_BRUSH_SIZE}px)</span>
-                  </div>
-                </motion.div>
-              )}
-            </div>
-
-            {/* Sticker Text & Outline Customizer */}
-            <div className="rounded-3xl border-2 border-white/15 bg-white/[0.08] p-5 backdrop-blur-xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/20 text-purple-400">
-                    <Type className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">Sticker Text & Outlines</h3>
-                    <p className="text-[11px] text-zinc-400">Bold captions and colored borders</p>
-                  </div>
-                </div>
-
-                <button
-                  id="add-text-btn"
-                  type="button"
-                  onClick={handleAddText}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/20 px-3 py-1.5 text-xs font-bold text-purple-300 transition hover:bg-purple-500/30 active:scale-95"
-                >
-                  <Type className="h-3.5 w-3.5" />
-                  + Add Text
-                </button>
-              </div>
-
-              {/* Selected Text Controls */}
-              {selectedTextElement ? (
-                <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/30 p-3.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-zinc-300">Edit Caption</span>
-                    <button
-                      type="button"
-                      onClick={handleDeleteSelected}
-                      className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1"
-                    >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </button>
-                  </div>
-
-                  <input
-                    type="text"
-                    value={selectedTextElement.text}
+                    min="20"
+                    max="80"
+                    value={selectedText.fontSize}
                     onChange={(e) =>
-                      handleUpdateText(selectedTextElement.id, { text: e.target.value })
+                      updateSelectedElement({ fontSize: parseInt(e.target.value, 10) })
                     }
-                    className="w-full rounded-xl border border-white/20 bg-zinc-900 px-3 py-2 text-sm font-extrabold text-white outline-none focus:border-orange-400"
+                    className="w-20 h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
                   />
+                </div>
+              </div>
 
-                  {/* Outline Stroke Slider */}
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between text-[11px] text-zinc-400">
-                      <span>Outline Thickness</span>
-                      <span className="font-mono text-white">{selectedTextElement.strokeWidth}px</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={20}
-                      value={selectedTextElement.strokeWidth}
-                      onChange={(e) =>
-                        handleUpdateText(selectedTextElement.id, {
-                          strokeWidth: Number(e.target.value),
-                        })
-                      }
-                      className="accent-orange-500"
+              {/* Row 3: Text Fill Color & Outer Stroke Border */}
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
+                {/* Color Swatches */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-white/60 font-semibold">Color:</span>
+                  {COLOR_PRESETS.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => updateSelectedElement({ fill: c })}
+                      className={`w-5 h-5 rounded-full border ${
+                        selectedText.fill === c
+                          ? "border-blue-400 scale-110 shadow-sm"
+                          : "border-white/20"
+                      } transition-transform`}
+                      style={{ backgroundColor: c }}
                     />
-                  </div>
-
-                  {/* Text Colors */}
-                  <div className="flex items-center justify-between pt-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-zinc-400">Text:</span>
-                      <input
-                        type="color"
-                        value={selectedTextElement.fill}
-                        onChange={(e) =>
-                          handleUpdateText(selectedTextElement.id, { fill: e.target.value })
-                        }
-                        className="h-7 w-7 cursor-pointer rounded-lg border-0 bg-transparent"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-zinc-400">Outline:</span>
-                      <input
-                        type="color"
-                        value={selectedTextElement.stroke}
-                        onChange={(e) =>
-                          handleUpdateText(selectedTextElement.id, { stroke: e.target.value })
-                        }
-                        className="h-7 w-7 cursor-pointer rounded-lg border-0 bg-transparent"
-                      />
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              ) : (
-                <div className="mt-4 rounded-2xl border border-white/5 bg-black/20 p-3 text-center text-xs text-zinc-500">
-                  Click "+ Add Text" or tap any text on canvas to change colors & outlines.
+
+                {/* Stroke Toggle/Width */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-white/60 font-semibold">Outline:</span>
+                  <button
+                    onClick={() =>
+                      updateSelectedElement({
+                        strokeWidth: (selectedText.strokeWidth || 0) > 0 ? 0 : 4,
+                        stroke: "#000000",
+                      })
+                    }
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                      (selectedText.strokeWidth || 0) > 0
+                        ? "bg-blue-600 text-white"
+                        : "bg-white/10 text-white/60"
+                    }`}
+                  >
+                    {(selectedText.strokeWidth || 0) > 0 ? "ON" : "OFF"}
+                  </button>
                 </div>
-              )}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between py-1">
+              <span className="text-xs text-white/70">No text layer selected</span>
+              <button
+                onClick={handleAddText}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 font-bold text-xs text-white"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Text</span>
+              </button>
             </div>
-
-            {/* Pack Manifest Settings Bento Card */}
-            <div className="rounded-3xl border-2 border-white/15 bg-white/[0.08] p-5 backdrop-blur-xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
-                    <Package className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">Pack Information</h3>
-                    <p className="text-[11px] text-zinc-400">Name and author shown in WhatsApp</p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setIsSidebarOpen(true)}
-                  className="text-xs text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1"
-                >
-                  <PanelRightOpen className="h-3.5 w-3.5" />
-                  View All
-                </button>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="text-[11px] font-semibold text-zinc-400">Pack Name</label>
-                  <input
-                    type="text"
-                    value={packName}
-                    onChange={(e) => setPackName(e.target.value)}
-                    placeholder="e.g. My Best Memes"
-                    className="mt-1 w-full rounded-xl border border-white/15 bg-zinc-900/90 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-orange-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-zinc-400">Creator Name</label>
-                  <input
-                    type="text"
-                    value={authorName}
-                    onChange={(e) => setAuthorName(e.target.value)}
-                    placeholder="e.g. Your Name"
-                    className="mt-1 w-full rounded-xl border border-white/15 bg-zinc-900/90 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-orange-400"
-                  />
-                </div>
-              </div>
-
-              {/* Pack Stickers Tray Preview */}
-              <div className="mt-4">
-                <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 mb-2">
-                  <span>Stickers in Pack ({packStickers.length}/30)</span>
-                  <span className="text-[10px] text-zinc-500">Preview icon ready</span>
-                </div>
-
-                {packStickers.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-4 text-center text-xs text-zinc-500">
-                    No stickers in this pack yet. Click "Add to Current Pack" below canvas to save your work.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-4 gap-2 max-h-36 overflow-y-auto pr-1">
-                    {packStickers.map((src, idx) => (
-                      <div
-                        key={idx}
-                        className="group/sticker relative aspect-square rounded-xl border border-white/15 bg-black/40 p-1 flex items-center justify-center"
-                      >
-                        <img
-                          src={src}
-                          alt={`Sticker ${idx + 1}`}
-                          className="h-full w-full object-contain"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveStickerFromPack(idx)}
-                          className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-white text-[10px] opacity-0 group-hover/sticker:opacity-100 transition-opacity"
-                        >
-                          ✕
-                        </button>
-                        <span className="absolute bottom-0.5 left-1 text-[9px] font-mono text-zinc-400">
-                          #{idx + 1}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </motion.div>
+          )}
         </div>
       )}
 
-      {/* ACTIVE PACK SLIDE-OUT SIDEBAR */}
-      <PackSidebar
-        isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
-        packName={packName}
-        onPackNameChange={setPackName}
-        authorName={authorName}
-        onAuthorNameChange={setAuthorName}
-        stickers={packStickers}
-        onRemoveSticker={handleRemoveStickerFromPack}
-        onAddCurrentSticker={handleAddStickerToPack}
-        onFinalizePack={() => {
-          setIsSidebarOpen(false);
-          setIsExportModalOpen(true);
-        }}
-      />
-
-      {/* WHATSAPP EXPORT MODAL */}
-      <ExportModal
-        isOpen={isExportModalOpen}
-        onClose={() => setIsExportModalOpen(false)}
-        packName={packName}
-        authorName={authorName}
-        stickers={currentStickersForExport}
-        onPublishSuccess={() => {
-          setSuccessMessage("🎉 Sticker pack successfully published to cloud & database!");
-          setTimeout(() => setSuccessMessage(null), 5000);
-        }}
-      />
-
-      {/* Asset Ingestion Loading Transition Overlay */}
-      <AnimatePresence>
-        {isIngestingAsset && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md p-6"
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 10 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 10 }}
-              className="flex flex-col items-center gap-4 rounded-3xl border-2 border-amber-500/30 bg-zinc-950/95 p-8 text-center shadow-2xl shadow-amber-500/20 max-w-sm w-full"
-            >
-              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-orange-500 via-amber-500 to-yellow-400 text-zinc-950 shadow-xl shadow-orange-500/30">
-                <Loader2 className="h-8 w-8 animate-spin" />
+      {/* CONTEXTUAL TOOL DRAWER: Emoji & Accessory Stamps */}
+      {activeTab === "emoji" && (
+        <div className="z-20 w-full max-w-lg mx-auto px-4 py-3 bg-[#121214] border-t border-white/10 flex flex-col gap-2.5 animate-in slide-in-from-bottom-2">
+          {/* Top Controls: Selected Stamp Controls or Category Selector */}
+          <div className="flex items-center justify-between gap-2">
+            {isSelectedEmoji && selectedText ? (
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">{selectedText.text}</span>
+                  <span className="text-xs text-white/70 font-semibold">Stamp Size</span>
+                  <input
+                    type="range"
+                    min="30"
+                    max="120"
+                    value={selectedText.fontSize}
+                    onChange={(e) =>
+                      updateSelectedElement({ fontSize: parseInt(e.target.value, 10) })
+                    }
+                    className="w-24 h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={handleDeleteSelectedElement}
+                  title="Remove Stamp"
+                  className="p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
-              <div>
-                <h3 className="text-base font-extrabold text-white font-['Space_Grotesk']">
-                  Ingesting Asset
-                </h3>
-                <p className="mt-1 text-xs text-amber-300 font-medium">
-                  {ingestStatusText}
-                </p>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                {EMOJI_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setEmojiCategory(cat.id)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      emojiCategory === cat.id
+                        ? "bg-white/20 text-white"
+                        : "text-white/60 hover:text-white"
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
               </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                <motion.div
-                  className="h-full bg-gradient-to-r from-orange-500 to-amber-400"
-                  animate={{ x: ["-100%", "100%"] }}
-                  transition={{ repeat: Infinity, duration: 1.2, ease: "easeInOut" }}
-                  style={{ width: "60%" }}
-                />
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            )}
+          </div>
 
-      {/* Notifications */}
-      <AnimatePresence>
-        {successMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="flex items-center gap-2.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/20 p-3.5 text-xs font-medium text-emerald-200"
-          >
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            <span>{successMessage}</span>
-          </motion.div>
-        )}
+          {/* Stamps Swatches Grid */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+            {EMOJI_CATEGORIES.find((c) => c.id === emojiCategory)?.items.map((emoji) => (
+              <button
+                key={emoji}
+                onClick={() => handleAddEmojiStamp(emoji)}
+                className="text-2xl p-2 rounded-xl bg-white/5 hover:bg-white/15 active:scale-90 transition-transform shrink-0"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
-        {errorMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="flex items-center gap-2.5 rounded-2xl border border-rose-500/30 bg-rose-500/20 p-3.5 text-xs font-medium text-rose-200"
+      {/* CONTEXTUAL TOOL DRAWER: Background & Cutout Studio */}
+      {activeTab === "background" && currentDisplayUrl && (
+        <div className="z-20 w-full max-w-lg mx-auto px-5 py-3.5 bg-[#121214] border-t border-white/10 flex flex-col gap-3 animate-in slide-in-from-bottom-2">
+          {/* Row 1: AI Cutout Button vs Original Toggle */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-white/5 border border-white/10">
+              <button
+                id="btn-mode-cutout"
+                onClick={() => {
+                  if (cutoutImageUrl) {
+                    setActiveImageMode("cutout");
+                  } else {
+                    triggerAiCutout();
+                  }
+                }}
+                disabled={isRemovingBg}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeImageMode === "cutout"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                    : "text-white/70 hover:text-white"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{cutoutImageUrl ? "Cutout" : "AI Cutout"}</span>
+              </button>
+
+              <button
+                id="btn-mode-original"
+                onClick={() => setActiveImageMode("original")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeImageMode === "original"
+                    ? "bg-white/20 text-white font-black"
+                    : "text-white/70 hover:text-white"
+                }`}
+              >
+                Original
+              </button>
+            </div>
+
+            {/* Re-Cutout Button if already processed */}
+            {cutoutImageUrl && (
+              <button
+                onClick={triggerAiCutout}
+                disabled={isRemovingBg}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600/20 text-purple-300 border border-purple-500/30 text-xs font-bold active:scale-95 transition-transform"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Re-run AI</span>
+              </button>
+            )}
+          </div>
+
+          {/* Row 2: Sticker Outline (Die-Cut Border) Slider & Swatches */}
+          <div className="flex items-center gap-3 pt-1">
+            <span className="text-[11px] font-bold text-white/70 shrink-0">
+              Border ({strokeWidth}px)
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="24"
+              step="2"
+              value={strokeWidth}
+              onChange={(e) => setStrokeWidth(parseInt(e.target.value, 10))}
+              className="flex-1 h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            />
+            {/* Outline Color Presets */}
+            <div className="flex items-center gap-1 shrink-0">
+              {["#ffffff", "#000000", "#3b82f6", "#22c55e", "#ef4444", "#eab308"].map(
+                (c) => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      setStrokeColor(c);
+                      if (strokeWidth === 0) setStrokeWidth(8);
+                    }}
+                    className={`w-5 h-5 rounded-full border ${
+                      strokeColor === c && strokeWidth > 0
+                        ? "border-blue-400 scale-110 shadow-sm"
+                        : "border-white/20"
+                    } transition-transform`}
+                    style={{ backgroundColor: c }}
+                  />
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BOTTOM BAR: 4 Clear Minimalist Actions (Gallery, Text, Emoji, Background) */}
+      <div className="relative z-20 bg-[#09090b] border-t border-white/10 pb-6 pt-2 px-6 w-full max-w-lg mx-auto">
+        <div className="grid grid-cols-4 items-center justify-items-center">
+          {/* 1. Gallery */}
+          <button
+            id="tab-gallery"
+            onClick={() => {
+              fileInputRef.current?.click();
+            }}
+            className="flex flex-col items-center gap-1 py-1 text-white/70 hover:text-white active:scale-95 transition-colors"
           >
-            <AlertTriangle className="h-4 w-4 text-rose-400" />
-            <span>{errorMessage}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center">
+              <ImageIcon className="w-6 h-6 stroke-[1.75]" />
+            </div>
+            <span className="text-[11px] font-medium">Gallery</span>
+          </button>
+
+          {/* 2. Text */}
+          <button
+            id="tab-text"
+            onClick={() => {
+              if (textElements.filter((t) => !t.id.startsWith("emoji-")).length === 0) {
+                handleAddText();
+              } else {
+                setActiveTab((prev) => (prev === "text" ? null : "text"));
+                const firstText = textElements.find((t) => !t.id.startsWith("emoji-"));
+                if (firstText) {
+                  setSelectedId(firstText.id);
+                }
+              }
+            }}
+            className={`flex flex-col items-center gap-1 py-1 transition-colors active:scale-95 ${
+              activeTab === "text"
+                ? "text-blue-400"
+                : "text-white/70 hover:text-white"
+            }`}
+          >
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center">
+              <Type className="w-6 h-6 stroke-[1.75]" />
+            </div>
+            <span className="text-[11px] font-medium">Text</span>
+          </button>
+
+          {/* 3. Emoji & Stamps */}
+          <button
+            id="tab-emoji"
+            onClick={() => {
+              setActiveTab((prev) => (prev === "emoji" ? null : "emoji"));
+              const firstEmoji = textElements.find((t) => t.id.startsWith("emoji-"));
+              if (firstEmoji) {
+                setSelectedId(firstEmoji.id);
+              }
+            }}
+            className={`flex flex-col items-center gap-1 py-1 transition-colors active:scale-95 ${
+              activeTab === "emoji"
+                ? "text-blue-400"
+                : "text-white/70 hover:text-white"
+            }`}
+          >
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center">
+              <Smile className="w-6 h-6 stroke-[1.75]" />
+            </div>
+            <span className="text-[11px] font-medium">Emoji</span>
+          </button>
+
+          {/* 4. Background (Cutout vs Original) */}
+          <button
+            id="tab-background"
+            onClick={() => {
+              setActiveTab((prev) =>
+                prev === "background" ? null : "background"
+              );
+            }}
+            className={`flex flex-col items-center gap-1 py-1 transition-colors active:scale-95 ${
+              activeTab === "background"
+                ? "text-blue-400"
+                : "text-white/70 hover:text-white"
+            }`}
+          >
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center">
+              <Layers className="w-6 h-6 stroke-[1.75]" />
+            </div>
+            <span className="text-[11px] font-medium">Background</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
-
-export default StickerWorkspace;

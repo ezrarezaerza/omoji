@@ -4,11 +4,30 @@
   "description": "Turn your photos and memes into fun, custom WhatsApp sticker packs with instant 1-click magic.",
   "start_url": "/",
   "id": "/",
+  "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
   "theme_color": "#0b0914",
   "background_color": "#0b0914",
-  "categories": ["photo", "utilities", "productivity"],
+  "lang": "en",
+  "categories": ["photo", "utilities", "productivity", "graphics"],
+  "shortcuts": [
+    {
+      "name": "Create New Sticker",
+      "short_name": "New Sticker",
+      "description": "Open the sticker maker canvas directly",
+      "url": "/?action=create",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "My Offline Drafts",
+      "short_name": "Drafts",
+      "description": "View your saved sticker projects",
+      "url": "/?action=drafts",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "icons": [
     {
       "src": "/icon-192.png",

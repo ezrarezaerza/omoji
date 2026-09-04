@@ -1,24 +1,77 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer utilities {
   .bg-grainy {
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.08'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
     background-repeat: repeat;
   }
 }
 
+/* Base Body Styles */
 body {
   margin: 0;
   min-height: 100vh;
-  background-color: #0b0914;
-  background-image: 
-    radial-gradient(at 10% 15%, hsla(270, 80%, 25%, 0.85) 0px, transparent 55%),
-    radial-gradient(at 90% 10%, hsla(18, 95%, 52%, 0.45) 0px, transparent 50%),
-    radial-gradient(at 85% 85%, hsla(280, 85%, 32%, 0.7) 0px, transparent 55%),
-    radial-gradient(at 15% 90%, hsla(28, 100%, 54%, 0.4) 0px, transparent 50%),
-    radial-gradient(at 50% 45%, hsla(255, 60%, 10%, 0.95) 0px, transparent 65%);
-  background-attachment: fixed;
-  color: #ffffff;
   font-family: 'Space Grotesk', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* WhatsApp Dark Mode Theme */
+html.dark,
+body.dark,
+html.dark body {
+  background-color: #0b141a;
+  background-image: 
+    radial-gradient(at 15% 15%, rgba(37, 211, 102, 0.15) 0px, transparent 50%),
+    radial-gradient(at 85% 15%, rgba(18, 140, 126, 0.18) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(11, 20, 26, 0.95) 0px, transparent 65%),
+    radial-gradient(at 80% 85%, rgba(18, 140, 126, 0.12) 0px, transparent 50%),
+    radial-gradient(at 15% 85%, rgba(37, 211, 102, 0.10) 0px, transparent 50%);
+  background-attachment: fixed;
+  color: #f1f5f9;
+}
+
+/* WhatsApp Light Mode Theme */
+html.light,
+body.light,
+html.light body {
+  background-color: #f0f2f5;
+  background-image: 
+    radial-gradient(at 15% 15%, rgba(37, 211, 102, 0.10) 0px, transparent 50%),
+    radial-gradient(at 85% 15%, rgba(18, 140, 126, 0.08) 0px, transparent 45%),
+    radial-gradient(at 50% 50%, rgba(240, 242, 245, 0.95) 0px, transparent 65%),
+    radial-gradient(at 80% 85%, rgba(37, 211, 102, 0.08) 0px, transparent 45%),
+    radial-gradient(at 15% 85%, rgba(18, 140, 126, 0.06) 0px, transparent 45%);
+  background-attachment: fixed;
+  color: #0f172a;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+body.dark ::-webkit-scrollbar-track {
+  background: #0b141a;
+}
+body.dark ::-webkit-scrollbar-thumb {
+  background: #1f2c34;
+  border-radius: 4px;
+}
+body.dark ::-webkit-scrollbar-thumb:hover {
+  background: #2a3942;
+}
+
+body.light ::-webkit-scrollbar-track {
+  background: #f0f2f5;
+}
+body.light ::-webkit-scrollbar-thumb {
+  background: #d1d7db;
+  border-radius: 4px;
+}
+body.light ::-webkit-scrollbar-thumb:hover {
+  background: #8696a0;
 }

@@ -40,13 +40,18 @@ model StickerPack {
 }
 
 model Sticker {
-  id        String      @id @default(cuid())
-  imageUrl  String
-  order     Int         @default(1)
-  emojis    String[]    @default([])
-  createdAt DateTime    @default(now())
-  packId    String
-  pack      StickerPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  id         String      @id @default(cuid())
+  imageUrl   String
+  order      Int         @default(1)
+  slotIndex  Int         @default(0)
+  emojis     String[]    @default([])
+  fileSize   Int?        @default(0)
+  isAnimated Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt @default(now())
+  packId     String
+  pack       StickerPack @relation(fields: [packId], references: [id], onDelete: Cascade)
 
+  @@unique([packId, slotIndex])
   @@map("stickers")
 }

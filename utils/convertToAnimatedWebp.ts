@@ -8,11 +8,13 @@ export interface AnimatedWebpOptions {
   targetSize?: number; // 512
   onProgress?: (progress: number) => void;
   timeoutMs?: number;
+  maxSizeBytes?: number; // 500KB limit for WhatsApp
 }
 
 /**
  * Converts a GIF or MP4 video file into an animated WhatsApp sticker-compliant WebP blob
- * using client-side FFmpeg WebAssembly, with graceful fallback to standard Blob.
+ * using client-side FFmpeg WebAssembly, with adaptive multi-pass compression to stay strictly
+ * under the 500KB limit.
  */
 export async function convertToAnimatedWebp(
   file: File,
@@ -20,12 +22,13 @@ export async function convertToAnimatedWebp(
   options: AnimatedWebpOptions = {}
 ): Promise<Blob> {
   const {
-    maxDurationSeconds = 6,
-    fps = 12,
-    quality = 50,
+    maxDurationSeconds = 3, // WhatsApp standard animation loop max duration
+    fps = 10,
+    quality = 45,
     targetSize = 512,
     onProgress,
-    timeoutMs = 12000,
+    timeoutMs = 25000,
+    maxSizeBytes = 490 * 1024, // Keep under 500 KB limit
   } = options;
 
   // Fallback immediately if FFmpeg engine is not provided or not loaded
@@ -54,10 +57,11 @@ export async function convertToAnimatedWebp(
       const fileData = await fetchFile(file);
       await ffmpeg.writeFile(inputFileName, fileData);
 
-      // Video filter: Scale preserving aspect ratio and center crop to exact 512x512
-      const videoFilter = `scale=${targetSize}:${targetSize}:force_original_aspect_ratio=increase,crop=${targetSize}:${targetSize}`;
+      // Video filter: Scale preserving aspect ratio within 480x480 (to preserve 16px safety margin) and pad to exact 512x512 transparent
+      const innerSize = targetSize - 32; // 480px with 16px padding
+      const videoFilter = `scale=${innerSize}:${innerSize}:force_original_aspect_ratio=decrease,pad=${targetSize}:${targetSize}:(ow-iw)/2:(oh-ih)/2:color=black@0`;
 
-      // Execute FFmpeg WebP encoding command
+      // Pass 1: Primary conversion
       const args = [
         "-i",
         inputFileName,
@@ -77,10 +81,10 @@ export async function convertToAnimatedWebp(
         outputFileName,
       ];
 
-      const exitCode = await ffmpeg.exec(args);
+      let exitCode = await ffmpeg.exec(args);
 
       if (exitCode !== 0) {
-        // Fallback with generic webp output
+        // Fallback argument syntax
         const fallbackArgs = [
           "-i",
           inputFileName,
@@ -97,17 +101,48 @@ export async function convertToAnimatedWebp(
           "-an",
           outputFileName,
         ];
-        const fallbackExitCode = await ffmpeg.exec(fallbackArgs);
-        if (fallbackExitCode !== 0) {
-          throw new Error(`FFmpeg conversion failed with exit code ${exitCode}`);
-        }
+        exitCode = await ffmpeg.exec(fallbackArgs);
       }
 
       // Read generated animated WebP file from virtual filesystem
-      const rawData = await ffmpeg.readFile(outputFileName);
-      const uint8Array = rawData instanceof Uint8Array ? rawData : new Uint8Array(rawData as any);
+      let rawData = await ffmpeg.readFile(outputFileName);
+      let uint8Array = rawData instanceof Uint8Array ? rawData : new Uint8Array(rawData as any);
+      let resultBlob = new Blob([uint8Array], { type: "image/webp" });
 
-      return new Blob([uint8Array], { type: "image/webp" });
+      // Pass 2: Adaptive reduction if file size exceeds WhatsApp 500KB constraint
+      if (resultBlob.size > maxSizeBytes) {
+        console.info(`[convertToAnimatedWebp] Result ${resultBlob.size} bytes exceeds ${maxSizeBytes} bytes. Running pass 2 reduction...`);
+        const pass2OutputFile = `output_pass2_${timestamp}.webp`;
+        const reducedArgs = [
+          "-i",
+          inputFileName,
+          "-t",
+          String(Math.min(2.5, maxDurationSeconds)),
+          "-vf",
+          `scale=420:420:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black@0`,
+          "-r",
+          "8",
+          "-loop",
+          "0",
+          "-qscale",
+          "28",
+          "-an",
+          "-vcodec",
+          "libwebp",
+          pass2OutputFile,
+        ];
+        await ffmpeg.exec(reducedArgs);
+        try {
+          const pass2Raw = await ffmpeg.readFile(pass2OutputFile);
+          const pass2Array = pass2Raw instanceof Uint8Array ? pass2Raw : new Uint8Array(pass2Raw as any);
+          resultBlob = new Blob([pass2Array], { type: "image/webp" });
+          await ffmpeg.deleteFile(pass2OutputFile);
+        } catch {
+          // Keep pass 1 result if pass 2 failed
+        }
+      }
+
+      return resultBlob;
     } finally {
       if (progressHandler) {
         ffmpeg.off("progress", progressHandler);

@@ -34,10 +34,12 @@ export const authOptions: any = {
         // Find user by either email or username
         const user = await prisma.user.findFirst({
           where: {
-            email: identifier,
-            username: identifier,
+            OR: [
+              { email: identifier },
+              { username: identifier },
+            ],
           },
-        });
+        }).catch(() => null);
 
         if (!user || !user.passwordHash) {
           throw new Error("No user found with the provided credentials.");

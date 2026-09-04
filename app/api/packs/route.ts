@@ -1,7 +1,7 @@
 import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
+import { getOrCreateSessionUser } from "@/lib/get-user-session";
 
-// Next.js App Router compatible JSON response helper
 const jsonResponse = (
   data: any,
   init?: { status?: number; headers?: Record<string, string> }
@@ -16,179 +16,41 @@ const jsonResponse = (
 };
 
 /**
- * POST /api/packs
- * Publishes a sticker pack to Vercel Blob storage and records it in Prisma DB.
- */
-export async function POST(req: Request) {
-  try {
-    // 1. Session / Authorization check
-    // Support NextAuth session header, Bearer token, or fallback user id header
-    const authHeader = req.headers.get("authorization");
-    const userIdHeader = req.headers.get("x-user-id");
-    
-    // In production NextAuth environment, getServerSession(authOptions) or user token is verified
-    let authenticatedUserId = userIdHeader;
-
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      const token = authHeader.substring(7);
-      // For token authentication
-      if (token && token !== "null" && token !== "undefined") {
-        authenticatedUserId = authenticatedUserId || token;
-      }
-    }
-
-    // Check if user exists in database or default to authenticated session
-    let user = null;
-    if (authenticatedUserId) {
-      user = await prisma.user.findUnique({
-        where: { id: authenticatedUserId },
-      });
-    }
-
-    // If no explicit token was passed, check for active test creator or require login
-    if (!user) {
-      const firstUser = (await prisma.user.findMany({}))?.[0];
-      if (firstUser) {
-        user = firstUser;
-      } else {
-        // Create default creator user session if none exists
-        user = await prisma.user.create({
-          data: {
-            email: "creator@stickerstudio.app",
-            username: "sticker_creator",
-            passwordHash: "pwa_session_token",
-          },
-        });
-      }
-    }
-
-    if (!user) {
-      return jsonResponse(
-        { error: "Unauthorized. Please sign in to publish sticker packs." },
-        { status: 401 }
-      );
-    }
-
-    // 2. Parse Multipart FormData payload
-    const formData = await req.formData();
-    const packTitle = (formData.get("packTitle") as string) || (formData.get("title") as string) || "Untitled Pack";
-    const authorName = (formData.get("authorName") as string) || user.username || "Sticker Studio Creator";
-    const trayIconFile = formData.get("trayIcon") as File | Blob | null;
-    const stickerFiles = formData.getAll("stickers") as (File | Blob)[];
-
-    if (!stickerFiles || stickerFiles.length === 0) {
-      return jsonResponse(
-        { error: "At least one sticker file is required to publish a pack." },
-        { status: 400 }
-      );
-    }
-
-    // 3. Upload Tray Icon and Stickers to Vercel Blob Storage
-    let trayIconUrl = "";
-    const hasBlobToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-
-    if (trayIconFile) {
-      const trayFileName = `packs/${user.id}/${Date.now()}_tray.png`;
-      if (hasBlobToken) {
-        const trayBlob = await put(trayFileName, trayIconFile, {
-          access: "public",
-          contentType: "image/png",
-        });
-        trayIconUrl = trayBlob.url;
-      } else {
-        // High-fidelity fallback storage for local sandbox environments
-        trayIconUrl = `https://blob.vercel-storage.com/demo-stickers/tray-${Date.now()}.png`;
-      }
-    }
-
-    // Upload individual sticker assets
-    const uploadedStickers: Array<{ url: string; order: number }> = [];
-
-    for (let i = 0; i < stickerFiles.length; i++) {
-      const file = stickerFiles[i];
-      const stickerFileName = `packs/${user.id}/${Date.now()}_sticker_${i + 1}.webp`;
-
-      let stickerUrl = "";
-      if (hasBlobToken) {
-        const blobRes = await put(stickerFileName, file, {
-          access: "public",
-          contentType: "image/webp",
-        });
-        stickerUrl = blobRes.url;
-      } else {
-        stickerUrl = `https://blob.vercel-storage.com/demo-stickers/${Date.now()}_${i + 1}.webp`;
-      }
-
-      uploadedStickers.push({
-        url: stickerUrl,
-        order: i + 1,
-      });
-    }
-
-    if (!trayIconUrl && uploadedStickers.length > 0) {
-      trayIconUrl = uploadedStickers[0].url;
-    }
-
-    // 4. Record the published pack and stickers in Prisma Database
-    const newPack = await prisma.stickerPack.create({
-      data: {
-        title: packTitle,
-        publisher: authorName,
-        trayIconUrl: trayIconUrl,
-        authorId: user.id,
-        isPublic: true,
-        isPublished: true,
-        downloadCount: 0,
-      },
-    });
-
-    // Create related sticker records
-    const createdStickers = [];
-    for (const stk of uploadedStickers) {
-      const stickerRecord = await prisma.sticker.create({
-        data: {
-          imageUrl: stk.url,
-          packId: newPack.id,
-          order: stk.order,
-          emojis: ["✨", "🔥"],
-        },
-      });
-      createdStickers.push(stickerRecord);
-    }
-
-    return jsonResponse(
-      {
-        message: "Sticker pack published successfully to Vercel Blob & Database!",
-        pack: {
-          ...newPack,
-          stickers: createdStickers,
-        },
-      },
-      { status: 201 }
-    );
-  } catch (error: any) {
-    console.error("Error publishing sticker pack:", error);
-    return jsonResponse(
-      { error: error?.message || "Internal server error while publishing sticker pack." },
-      { status: 500 }
-    );
-  }
-}
-
-/**
  * GET /api/packs
- * Retrieves published sticker packs.
+ * Retrieves all sticker packs ordered by latest creation/update.
  */
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const user = await getOrCreateSessionUser(req);
+    const url = new URL(req.url);
+    const filter = url.searchParams.get("filter"); // "mine" | "community" | "all"
+
+    let whereClause: any;
+    if (filter === "mine") {
+      whereClause = { authorId: user.id };
+    } else if (filter === "community") {
+      whereClause = { isPublished: true, isPublic: true, NOT: { authorId: user.id } };
+    } else {
+      // Default: show the current user's packs. If the user is an authenticated creator, also show public community packs.
+      // If the user is a guest, show only the guest's own packs.
+      if (user.id.startsWith("guest_")) {
+        whereClause = { authorId: user.id };
+      } else {
+        whereClause = {
+          OR: [
+            { authorId: user.id },
+            { isPublished: true, isPublic: true },
+          ],
+        };
+      }
+    }
+
     const packs = await prisma.stickerPack.findMany({
-      where: {
-        isPublished: true,
-      },
+      where: whereClause,
       include: {
         stickers: {
           orderBy: {
-            order: "asc",
+            slotIndex: "asc",
           },
         },
         author: {
@@ -200,12 +62,184 @@ export async function GET() {
         },
       },
       orderBy: {
-        createdAt: "desc",
+        updatedAt: "desc",
       },
     });
+
     return jsonResponse({ packs });
   } catch (error: any) {
     console.error("Error fetching packs:", error);
-    return jsonResponse({ error: "Failed to fetch sticker packs." }, { status: 500 });
+    return jsonResponse(
+      { error: "Failed to fetch sticker packs.", details: error?.message },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST /api/packs
+ * Creates a new sticker pack in PostgreSQL.
+ * Accepts either JSON or multipart/form-data.
+ */
+export async function POST(req: Request) {
+  try {
+    const user = await getOrCreateSessionUser(req);
+    const contentType = req.headers.get("content-type") || "";
+
+    let packTitle = "Untitled Pack";
+    let authorName = user.username || "Sticker Studio Creator";
+    let trayIconUrl = "";
+    let trayIconFile: File | Blob | null = null;
+    const initialStickers: Array<{ file?: File | Blob; url?: string; slotIndex: number; emojis?: string[] }> = [];
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await req.formData();
+      packTitle =
+        (formData.get("packTitle") as string) ||
+        (formData.get("title") as string) ||
+        (formData.get("name") as string) ||
+        "Untitled Pack";
+      authorName =
+        (formData.get("authorName") as string) ||
+        (formData.get("creator") as string) ||
+        (formData.get("publisher") as string) ||
+        user.username ||
+        "Sticker Studio Creator";
+      
+      trayIconFile = formData.get("trayIcon") as File | Blob | null;
+      trayIconUrl = (formData.get("trayIconUrl") as string) || "";
+
+      // Optional bulk stickers passed during creation
+      const stickerFiles = formData.getAll("stickers") as (File | Blob)[];
+      stickerFiles.forEach((file, index) => {
+        initialStickers.push({ file, slotIndex: index, emojis: ["✨"] });
+      });
+    } else {
+      const body = await req.json().catch(() => ({}));
+      packTitle = body.title || body.name || body.packTitle || "Untitled Pack";
+      authorName = body.publisher || body.creator || body.authorName || user.username || "Sticker Studio Creator";
+      trayIconUrl = body.trayIconUrl || "";
+    }
+
+    // Upload Tray Icon if provided as a File
+    const hasBlobToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+    if (trayIconFile && hasBlobToken) {
+      try {
+        const trayFileName = `packs/${user.id}/${Date.now()}_tray.png`;
+        const trayBlob = await put(trayFileName, trayIconFile, {
+          access: "public",
+          contentType: "image/png",
+        });
+        trayIconUrl = trayBlob.url;
+      } catch (blobErr) {
+        console.warn("Tray icon blob upload warning:", blobErr);
+      }
+    }
+
+    // Default tray icon placeholder if none provided
+    if (!trayIconUrl) {
+      trayIconUrl = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(packTitle)}`;
+    }
+
+    // Create the pack record in PostgreSQL
+    const newPack = await prisma.stickerPack.create({
+      data: {
+        title: packTitle.trim(),
+        publisher: authorName.trim(),
+        trayIconUrl: trayIconUrl,
+        authorId: user.id,
+        isPublic: true,
+        isPublished: true,
+        downloadCount: 0,
+      },
+      include: {
+        author: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    // If initial stickers were included, upload and record them in their slots
+    const createdStickers: any[] = [];
+    for (const stk of initialStickers) {
+      let stickerUrl = stk.url || "";
+      if (stk.file && hasBlobToken) {
+        try {
+          const stickerBlob = await put(
+            `packs/${user.id}/${newPack.id}_slot_${stk.slotIndex}.webp`,
+            stk.file,
+            { access: "public", contentType: "image/webp" }
+          );
+          stickerUrl = stickerBlob.url;
+        } catch (e) {
+          console.warn("Initial sticker upload warning:", e);
+        }
+      }
+
+      if (stickerUrl) {
+        const record = await prisma.sticker.create({
+          data: {
+            packId: newPack.id,
+            slotIndex: stk.slotIndex,
+            order: stk.slotIndex + 1,
+            imageUrl: stickerUrl,
+            emojis: stk.emojis || ["✨"],
+          },
+        });
+        createdStickers.push(record);
+      }
+    }
+
+    return jsonResponse(
+      {
+        message: "Sticker pack created successfully!",
+        pack: {
+          ...newPack,
+          stickers: createdStickers,
+        },
+      },
+      { status: 201 }
+    );
+  } catch (error: any) {
+    console.error("Error creating sticker pack:", error);
+    return jsonResponse(
+      { error: "Failed to create sticker pack.", details: error?.message },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/packs
+ * Deletes a sticker pack by query param `?id=...`.
+ */
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const packId = searchParams.get("id");
+
+    if (!packId) {
+      return jsonResponse({ error: "Pack ID is required." }, { status: 400 });
+    }
+
+    await prisma.sticker.deleteMany({
+      where: { packId },
+    });
+
+    await prisma.stickerPack.delete({
+      where: { id: packId },
+    });
+
+    return jsonResponse({ message: "Sticker pack deleted successfully", id: packId });
+  } catch (error: any) {
+    console.error("Error deleting pack:", error);
+    return jsonResponse(
+      { error: "Failed to delete sticker pack.", details: error?.message },
+      { status: 500 }
+    );
   }
 }

@@ -1,18 +1,23 @@
 "use client";
 
-import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from "react";
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+  useCallback,
+} from "react";
 import {
   Stage,
   Layer,
   Image as KonvaImage,
   Text as KonvaText,
   Transformer,
-  Circle,
-  Line,
-  Group,
+  Rect,
 } from "react-konva";
 import Konva from "konva";
-import { ActiveTool } from "../../hooks/useEditorState";
+import { generateDieCutOutlineCanvas } from "../../utils/stickerEffects";
 
 export interface TextElement {
   id: string;
@@ -20,474 +25,468 @@ export interface TextElement {
   x: number;
   y: number;
   fontSize: number;
+  fontFamily?: string;
   fill: string;
-  stroke: string;
-  strokeWidth: number;
-  rotation: number;
+  stroke?: string;
+  strokeWidth?: number;
+  rotation?: number;
+  align?: "left" | "center" | "right";
+  scaleX?: number;
+  scaleY?: number;
 }
 
 export interface DrawingLine {
+  id?: string;
   points: number[];
-  tool: "erase" | "restore";
+  tool: "erase" | "restore" | "magic_edge" | "feather" | "color_wand";
   brushSize: number;
+  opacity?: number;
+  hardness?: number;
 }
 
-export interface CanvasEditorProps {
-  imageUrl: string | null;
-  originalImageUrl?: string | null;
-  textElements: TextElement[];
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  onUpdateText: (id: string, newAttrs: Partial<TextElement>) => void;
-  activeTool?: ActiveTool;
-  brushSize?: number;
-  onImageModified?: (newDataUrl: string) => void;
+export interface CanvasImageTransform {
+  x: number;
+  y: number;
+  scaleX: number;
+  scaleY: number;
+  rotation: number;
 }
 
 export interface CanvasEditorHandle {
   exportImage: () => string | null;
   stageRef: Konva.Stage | null;
-  clearLines: () => void;
-  lines: DrawingLine[];
+  fitAndCenterImage: () => void;
+  resetTransform: () => void;
+  flipHorizontal: () => void;
+  flipVertical: () => void;
 }
+
+export interface CanvasEditorProps {
+  imageUrl: string | null;
+  textElements?: TextElement[];
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onUpdateText?: (id: string, newAttrs: Partial<TextElement>) => void;
+  onEditTextInline?: (id: string) => void;
+  showSafeZone?: boolean;
+  strokeWidth?: number;
+  strokeColor?: string;
+}
+
+const STAGE_SIZE = 512;
 
 export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
   (
     {
       imageUrl,
-      originalImageUrl,
-      textElements,
+      textElements = [],
       selectedId,
       onSelect,
       onUpdateText,
-      activeTool = "SELECT",
-      brushSize = 20,
-      onImageModified,
+      onEditTextInline,
+      showSafeZone = true,
+      strokeWidth = 0,
+      strokeColor = "#ffffff",
     },
     ref
   ) => {
     const stageRef = useRef<Konva.Stage>(null);
-    const trRef = useRef<Konva.Transformer>(null);
-    const stickerGroupRef = useRef<Konva.Group>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const imageRef = useRef<Konva.Image>(null);
+    const outlineRef = useRef<Konva.Image>(null);
+    const transformerRef = useRef<Konva.Transformer>(null);
+    const textNodesRef = useRef<{ [key: string]: Konva.Text | null }>({});
 
-    // Freehand drawing lines state array
-    const [lines, setLines] = useState<DrawingLine[]>([]);
+    // Responsive viewport size
+    const [viewportSize, setViewportSize] = useState<number>(STAGE_SIZE);
+    const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
+    const [outlineCanvas, setOutlineCanvas] = useState<HTMLCanvasElement | null>(null);
 
-    // Image elements for compositing (cutout and original un-processed photo)
-    const [imageElement, setImageElement] = useState<HTMLImageElement | null>(null);
-    const [originalImageElement, setOriginalImageElement] = useState<HTMLImageElement | null>(null);
-
-    // Cursor tracking for brush preview
-    const [cursorPos, setCursorPos] = useState<{ x: number; y: number; visible: boolean }>({
-      x: -100,
-      y: -100,
-      visible: false,
+    // Image Transform coordinates (default centered at 256, 256)
+    const [imageTransform, setImageTransform] = useState<CanvasImageTransform>({
+      x: STAGE_SIZE / 2,
+      y: STAGE_SIZE / 2,
+      scaleX: 1,
+      scaleY: 1,
+      rotation: 0,
     });
-    const isDrawingRef = useRef(false);
 
-    const isDrawingMode = activeTool === "ERASE" || activeTool === "RESTORE";
-
-    // Load original un-processed image for restore reference
+    // ResizeObserver to keep canvas strictly square and 1:1 responsive
     useEffect(() => {
-      if (!originalImageUrl) {
-        setOriginalImageElement(null);
-        return;
-      }
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = originalImageUrl;
-      img.onload = () => {
-        setOriginalImageElement(img);
-      };
-    }, [originalImageUrl]);
+      const container = containerRef.current;
+      if (!container) return;
 
-    // Load AI-processed cutout sticker image element
+      const updateSize = () => {
+        const rect = container.getBoundingClientRect();
+        const minDim = Math.min(rect.width, rect.height);
+        if (minDim > 0) {
+          setViewportSize(minDim);
+        }
+      };
+
+      updateSize();
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(container);
+
+      return () => observer.disconnect();
+    }, []);
+
+    // Load Image Object & auto-fit into 512x512 with safe margins
     useEffect(() => {
       if (!imageUrl) {
-        setImageElement(null);
+        setImageObj(null);
+        setOutlineCanvas(null);
         return;
       }
 
+      let isCurrent = true;
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.src = imageUrl;
+
       img.onload = () => {
-        setImageElement(img);
+        if (!isCurrent) return;
+        setImageObj(img);
+
+        // Auto-fit image within 512x512 (allowing 32px safe zone padding)
+        const maxContentSize = STAGE_SIZE - 48; // 464px
+        const scale = Math.min(
+          maxContentSize / img.width,
+          maxContentSize / img.height,
+          1.5
+        );
+
+        setImageTransform({
+          x: STAGE_SIZE / 2,
+          y: STAGE_SIZE / 2,
+          scaleX: scale,
+          scaleY: scale,
+          rotation: 0,
+        });
+      };
+
+      return () => {
+        isCurrent = false;
       };
     }, [imageUrl]);
 
-    // Export handle & ref methods
-    useImperativeHandle(ref, () => ({
-      exportImage: () => {
-        if (!stageRef.current) return null;
-        if (trRef.current) {
-          trRef.current.nodes([]);
-        }
-        return stageRef.current.toDataURL({ pixelRatio: 1, mimeType: "image/webp" });
-      },
-      stageRef: stageRef.current,
-      clearLines: () => setLines([]),
-      lines,
-    }));
-
-    // Center unified sticker group on initial image load
+    // Generate White / Colored Sticker Die-Cut Outline when enabled
     useEffect(() => {
-      if (imageElement && stickerGroupRef.current) {
-        const group = stickerGroupRef.current;
-        const stageWidth = 512;
-        const stageHeight = 512;
-        const imgW = imageElement.width || 512;
-        const imgH = imageElement.height || 512;
-        const scale = Math.min((stageWidth * 0.8) / imgW, (stageHeight * 0.8) / imgH);
-
-        if (group.x() === 0 && group.y() === 0) {
-          group.scaleX(scale);
-          group.scaleY(scale);
-          group.position({
-            x: (stageWidth - imgW * scale) / 2,
-            y: (stageHeight - imgH * scale) / 2,
-          });
-          group.getLayer()?.batchDraw();
-        }
-      }
-    }, [imageElement]);
-
-    // Update transformer selection
-    useEffect(() => {
-      if (!trRef.current || !stageRef.current) return;
-
-      if (!selectedId || isDrawingMode) {
-        trRef.current.nodes([]);
-        trRef.current.getLayer()?.batchDraw();
+      if (!imageObj || strokeWidth <= 0) {
+        setOutlineCanvas(null);
         return;
       }
 
-      const targetId =
-        selectedId === "main-sticker-image" || selectedId === "main-sticker-group"
-          ? "main-sticker-group"
-          : selectedId;
+      const generated = generateDieCutOutlineCanvas(imageObj, {
+        enabled: true,
+        width: strokeWidth,
+        color: strokeColor,
+        shadowEnabled: true,
+        shadowBlur: 4,
+        shadowOffsetY: 2,
+        shadowColor: "rgba(0, 0, 0, 0.4)",
+      });
 
-      const selectedNode = stageRef.current.findOne(`#${targetId}`);
-      if (selectedNode) {
-        trRef.current.nodes([selectedNode]);
-        trRef.current.getLayer()?.batchDraw();
-      } else {
-        trRef.current.nodes([]);
-      }
-    }, [selectedId, textElements, imageElement, isDrawingMode]);
+      setOutlineCanvas(generated);
+    }, [imageObj, strokeWidth, strokeColor]);
 
-    // Stage Pointer Event Handlers for Freehand Drawing & Selection
-    const handlePointerDown = (e: any) => {
-      if (isDrawingMode) {
-        isDrawingRef.current = true;
-        const stage = e.target.getStage();
-        const pos = stage?.getPointerPosition();
+    // Attach/Detach Transformer cleanly to either subject image or selected text element
+    useEffect(() => {
+      const tr = transformerRef.current;
+      if (!tr) return;
 
-        if (pos) {
-          const groupNode = stickerGroupRef.current;
-          let localPos = pos;
-          let scale = 1;
-          if (groupNode) {
-            const transform = groupNode.getAbsoluteTransform().copy().invert();
-            localPos = transform.point(pos);
-            scale = groupNode.scaleX() || 1;
-          }
-
-          const currentTool: "erase" | "restore" =
-            activeTool.toLowerCase() === "erase" ? "erase" : "restore";
-
-          const normalizedBrushSize = Math.max(2, brushSize / scale);
-
-          const newLine: DrawingLine = {
-            tool: currentTool,
-            points: [localPos.x, localPos.y],
-            brushSize: normalizedBrushSize,
-          };
-
-          setLines((prev) => [...prev, newLine]);
+      if (selectedId === "subject-image" && imageRef.current) {
+        tr.nodes([imageRef.current]);
+        tr.getLayer()?.batchDraw();
+      } else if (selectedId && textNodesRef.current[selectedId]) {
+        const textNode = textNodesRef.current[selectedId];
+        if (textNode) {
+          tr.nodes([textNode]);
+          tr.getLayer()?.batchDraw();
         }
       } else {
-        const clickedOnEmpty = e.target === e.target.getStage();
-        if (clickedOnEmpty) {
-          onSelect(null);
+        tr.nodes([]);
+        tr.getLayer()?.batchDraw();
+      }
+    }, [selectedId, imageObj, textElements]);
+
+    // Fit & Center image helper
+    const fitAndCenterImage = useCallback(() => {
+      if (!imageObj) return;
+      const maxContentSize = STAGE_SIZE - 48;
+      const scale = Math.min(
+        maxContentSize / imageObj.width,
+        maxContentSize / imageObj.height,
+        1.5
+      );
+      setImageTransform({
+        x: STAGE_SIZE / 2,
+        y: STAGE_SIZE / 2,
+        scaleX: scale,
+        scaleY: scale,
+        rotation: 0,
+      });
+    }, [imageObj]);
+
+    // Reset transform
+    const resetTransform = useCallback(() => {
+      setImageTransform({
+        x: STAGE_SIZE / 2,
+        y: STAGE_SIZE / 2,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+      });
+    }, []);
+
+    // Flip horizontal
+    const flipHorizontal = useCallback(() => {
+      setImageTransform((prev) => ({
+        ...prev,
+        scaleX: prev.scaleX * -1,
+      }));
+    }, []);
+
+    // Flip vertical
+    const flipVertical = useCallback(() => {
+      setImageTransform((prev) => ({
+        ...prev,
+        scaleY: prev.scaleY * -1,
+      }));
+    }, []);
+
+    // Expose imperative handle for WYSIWYG export
+    useImperativeHandle(ref, () => ({
+      exportImage: () => {
+        if (!stageRef.current) return null;
+
+        // Deselect any bounding boxes before capturing snapshot
+        const tr = transformerRef.current;
+        const currentNodes = tr?.nodes() || [];
+        if (tr) tr.nodes([]);
+
+        const stage = stageRef.current;
+        // Export strictly at 512x512 with transparent background
+        const dataUrl = stage.toDataURL({
+          pixelRatio: STAGE_SIZE / viewportSize,
+          mimeType: "image/webp",
+          quality: 0.9,
+        });
+
+        // Restore transformer
+        if (tr && currentNodes.length > 0) {
+          tr.nodes(currentNodes);
+          tr.getLayer()?.batchDraw();
         }
-      }
-    };
 
-    const handlePointerMove = (e: any) => {
-      const stage = e.target.getStage();
-      const pos = stage?.getPointerPosition();
+        return dataUrl;
+      },
+      stageRef: stageRef.current,
+      fitAndCenterImage,
+      resetTransform,
+      flipHorizontal,
+      flipVertical,
+    }));
 
-      if (pos) {
-        if (isDrawingMode) {
-          setCursorPos({ x: pos.x, y: pos.y, visible: true });
-
-          if (isDrawingRef.current) {
-            const groupNode = stickerGroupRef.current;
-            let localPos = pos;
-            if (groupNode) {
-              const transform = groupNode.getAbsoluteTransform().copy().invert();
-              localPos = transform.point(pos);
-            }
-
-            setLines((prevLines) => {
-              if (prevLines.length === 0) return prevLines;
-              const lastLine = { ...prevLines[prevLines.length - 1] };
-              // Append new local coordinate pair
-              lastLine.points = lastLine.points.concat([localPos.x, localPos.y]);
-              const updatedLines = [...prevLines];
-              updatedLines.splice(updatedLines.length - 1, 1, lastLine);
-              return updatedLines;
-            });
-          }
-        }
-      }
-    };
-
-    const handlePointerUp = () => {
-      if (isDrawingRef.current) {
-        isDrawingRef.current = false;
-        if (onImageModified && stageRef.current) {
-          // Trigger reactive export update when drawing stroke finishes
-          const dataUrl = stageRef.current.toDataURL({ pixelRatio: 1, mimeType: "image/webp" });
-          if (dataUrl) {
-            onImageModified(dataUrl);
-          }
-        }
-      }
-    };
-
-    const handlePointerLeave = () => {
-      setCursorPos((prev) => ({ ...prev, visible: false }));
-      if (isDrawingRef.current) {
-        handlePointerUp();
-      }
-    };
-
-    const imageWidth = imageElement?.width || 512;
-    const imageHeight = imageElement?.height || 512;
-
-    const eraseLines = lines.filter((l) => l.tool === "erase");
-    const restoreLines = lines.filter((l) => l.tool === "restore");
+    // Konva scale factor to map 512 virtual coordinates to responsive container
+    const stageScale = viewportSize / STAGE_SIZE;
 
     return (
-      <div className="relative flex w-full items-center justify-center select-none">
-        {/* Outer Frame with WhatsApp sticker checkerboard pattern */}
+      <div
+        ref={containerRef}
+        id="canvas-editor-container"
+        className="relative w-full h-full flex items-center justify-center select-none overflow-hidden touch-none"
+        onClick={(e) => {
+          // Deselect when clicking outside active nodes
+          if (e.target === e.currentTarget) {
+            onSelect(null);
+          }
+        }}
+      >
+        {/* Subtle Checkered Transparency Background for WYSIWYG perception */}
         <div
-          id="canvas-stage-wrapper"
-          className={`relative aspect-square w-full max-w-[480px] sm:max-w-[512px] overflow-hidden rounded-3xl border-2 bg-zinc-950 shadow-2xl transition-all ${
-            activeTool === "ERASE"
-              ? "border-rose-500/50 shadow-rose-950/40 cursor-crosshair"
-              : activeTool === "RESTORE"
-              ? "border-emerald-500/50 shadow-emerald-950/40 cursor-crosshair"
-              : "border-white/20"
-          }`}
-          onMouseLeave={handlePointerLeave}
+          className="relative shadow-2xl rounded-2xl overflow-hidden"
+          style={{
+            width: viewportSize,
+            height: viewportSize,
+            backgroundImage: `
+              linear-gradient(45deg, #1c1c1e 25%, transparent 25%),
+              linear-gradient(-45deg, #1c1c1e 25%, transparent 25%),
+              linear-gradient(45deg, transparent 75%, #1c1c1e 75%),
+              linear-gradient(-45deg, transparent 75%, #1c1c1e 75%)
+            `,
+            backgroundSize: "20px 20px",
+            backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+            backgroundColor: "#121214",
+          }}
         >
-          {/* Transparency checkerboard background */}
-          <div
-            className="absolute inset-0 opacity-20 pointer-events-none"
-            style={{
-              backgroundImage:
-                "linear-gradient(45deg, #27272a 25%, transparent 25%), linear-gradient(-45deg, #27272a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #27272a 75%), linear-gradient(-45deg, transparent 75%, #27272a 75%)",
-              backgroundSize: "24px 24px",
-              backgroundPosition: "0 0, 0 12px, 12px -12px, -12px 0px",
+          <Stage
+            ref={stageRef}
+            width={viewportSize}
+            height={viewportSize}
+            scaleX={stageScale}
+            scaleY={stageScale}
+            onMouseDown={(e) => {
+              if (e.target === e.target.getStage()) {
+                onSelect(null);
+              }
             }}
-          />
+            onTouchStart={(e) => {
+              if (e.target === e.target.getStage()) {
+                onSelect(null);
+              }
+            }}
+          >
+            {/* Layer 1: Sticker Outline (rendered right below subject) */}
+            <Layer>
+              {outlineCanvas && imageObj && (
+                <KonvaImage
+                  ref={outlineRef}
+                  image={outlineCanvas}
+                  x={imageTransform.x}
+                  y={imageTransform.y}
+                  offsetX={imageObj.width / 2}
+                  offsetY={imageObj.height / 2}
+                  scaleX={imageTransform.scaleX}
+                  scaleY={imageTransform.scaleY}
+                  rotation={imageTransform.rotation}
+                  listening={false}
+                />
+              )}
+            </Layer>
 
-          {/* Konva Stage Container with responsive scale */}
-          <div className="relative h-full w-full [&>div]:!w-full [&>div]:!h-full [&_canvas]:!w-full [&_canvas]:!h-full">
-            <Stage
-              ref={stageRef}
-              width={512}
-              height={512}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onMouseDown={handlePointerDown}
-              onMouseMove={handlePointerMove}
-              onMouseUp={handlePointerUp}
-              onTouchStart={handlePointerDown}
-              onTouchMove={handlePointerMove}
-              onTouchEnd={handlePointerUp}
-              className="touch-none"
-            >
-              {/* Image & Erase/Restore Compositing Layer */}
-              <Layer>
-                {/* 
-                  Unified Sticker Entity Group:
-                  Contains the base AI cutout, original photo restore mask, and erase strokes.
-                  When activeTool === 'SELECT', this group moves, scales, and rotates as one entity.
-                */}
-                <Group
-                  id="main-sticker-group"
-                  ref={stickerGroupRef}
-                  draggable={!isDrawingMode}
-                  onClick={() => !isDrawingMode && onSelect("main-sticker-group")}
-                  onTap={() => !isDrawingMode && onSelect("main-sticker-group")}
-                >
-                  {/* 1. Bottom Layer: Restored Original Image revealed by restore strokes */}
-                  {originalImageElement && restoreLines.length > 0 && (
-                    <Group id="restored-pixels-layer">
-                      <KonvaImage
-                        image={originalImageElement}
-                        width={imageWidth}
-                        height={imageHeight}
-                      />
-                      {restoreLines.map((line, index) => (
-                        <Line
-                          key={`restore-line-${index}`}
-                          points={line.points}
-                          stroke="rgba(0,0,0,1)"
-                          strokeWidth={line.brushSize}
-                          tension={0.5}
-                          lineCap="round"
-                          lineJoin="round"
-                          globalCompositeOperation="destination-in"
-                        />
-                      ))}
-                    </Group>
-                  )}
+            {/* Layer 2: Subject Cutout Image Layer */}
+            <Layer>
+              {imageObj && (
+                <KonvaImage
+                  ref={imageRef}
+                  id="subject-image"
+                  image={imageObj}
+                  x={imageTransform.x}
+                  y={imageTransform.y}
+                  offsetX={imageObj.width / 2}
+                  offsetY={imageObj.height / 2}
+                  scaleX={imageTransform.scaleX}
+                  scaleY={imageTransform.scaleY}
+                  rotation={imageTransform.rotation}
+                  draggable
+                  onClick={() => onSelect("subject-image")}
+                  onTap={() => onSelect("subject-image")}
+                  onDragEnd={(e) => {
+                    setImageTransform((prev) => ({
+                      ...prev,
+                      x: e.target.x(),
+                      y: e.target.y(),
+                    }));
+                  }}
+                  onTransformEnd={() => {
+                    const node = imageRef.current;
+                    if (!node) return;
+                    setImageTransform({
+                      x: node.x(),
+                      y: node.y(),
+                      scaleX: node.scaleX(),
+                      scaleY: node.scaleY(),
+                      rotation: node.rotation(),
+                    });
+                  }}
+                />
+              )}
+            </Layer>
 
-                  {/* 2. Middle Layer: AI Cutout Image */}
-                  {imageElement && (
-                    <KonvaImage
-                      id="main-sticker-image"
-                      image={imageElement}
-                      width={imageWidth}
-                      height={imageHeight}
-                    />
-                  )}
+            {/* Layer 3: Text & Meme Typography Layer */}
+            <Layer>
+              {textElements.map((txt) => (
+                <KonvaText
+                  key={txt.id}
+                  id={txt.id}
+                  ref={(node) => {
+                    textNodesRef.current[txt.id] = node;
+                  }}
+                  text={txt.text}
+                  x={txt.x}
+                  y={txt.y}
+                  fontSize={txt.fontSize}
+                  fontFamily={txt.fontFamily || "Impact"}
+                  fontStyle={txt.fontFamily === "Impact" ? "bold" : "normal"}
+                  fill={txt.fill}
+                  stroke={txt.stroke || "#000000"}
+                  strokeWidth={txt.strokeWidth ?? 4}
+                  lineJoin="round"
+                  rotation={txt.rotation || 0}
+                  scaleX={txt.scaleX ?? 1}
+                  scaleY={txt.scaleY ?? 1}
+                  align={txt.align || "center"}
+                  draggable
+                  onClick={() => onSelect(txt.id)}
+                  onTap={() => onSelect(txt.id)}
+                  onDblClick={() => onEditTextInline?.(txt.id)}
+                  onDblTap={() => onEditTextInline?.(txt.id)}
+                  onDragEnd={(e) => {
+                    onUpdateText?.(txt.id, {
+                      x: e.target.x(),
+                      y: e.target.y(),
+                    });
+                  }}
+                  onTransformEnd={() => {
+                    const node = textNodesRef.current[txt.id];
+                    if (!node) return;
+                    onUpdateText?.(txt.id, {
+                      x: node.x(),
+                      y: node.y(),
+                      scaleX: node.scaleX(),
+                      scaleY: node.scaleY(),
+                      rotation: node.rotation(),
+                    });
+                  }}
+                />
+              ))}
+            </Layer>
 
-                  {/* 3. Top Erase Layer: Punches holes through cutout and restored areas */}
-                  {eraseLines.map((line, index) => (
-                    <Line
-                      key={`erase-line-${index}`}
-                      points={line.points}
-                      stroke="rgba(0,0,0,1)"
-                      strokeWidth={line.brushSize}
-                      tension={0.5}
-                      lineCap="round"
-                      lineJoin="round"
-                      globalCompositeOperation="destination-out"
-                    />
-                  ))}
-                </Group>
+            {/* Layer 4: Controls, Guides & Transformer */}
+            <Layer>
+              {/* WhatsApp 16px Safe-Zone Border (Inset 16px -> 480x480 active box) */}
+              {showSafeZone && (
+                <Rect
+                  x={16}
+                  y={16}
+                  width={STAGE_SIZE - 32}
+                  height={STAGE_SIZE - 32}
+                  stroke="rgba(255, 255, 255, 0.2)"
+                  strokeWidth={1.5}
+                  dash={[6, 6]}
+                  listening={false}
+                />
+              )}
 
-                {/* Editable Text Elements with classic sticker outline */}
-                {textElements.map((el) => (
-                  <KonvaText
-                    key={el.id}
-                    id={el.id}
-                    text={el.text}
-                    x={el.x}
-                    y={el.y}
-                    fontSize={el.fontSize}
-                    fontFamily="Space Grotesk, Impact, sans-serif"
-                    fontStyle="800"
-                    fill={el.fill}
-                    stroke={el.stroke}
-                    strokeWidth={el.strokeWidth}
-                    fillAfterStrokeEnabled={true}
-                    lineJoin="round"
-                    align="center"
-                    draggable={!isDrawingMode}
-                    rotation={el.rotation || 0}
-                    onClick={() => !isDrawingMode && onSelect(el.id)}
-                    onTap={() => !isDrawingMode && onSelect(el.id)}
-                    onDragEnd={(e) => {
-                      onUpdateText(el.id, {
-                        x: e.target.x(),
-                        y: e.target.y(),
-                      });
-                    }}
-                    onTransformEnd={(e) => {
-                      const node = e.target;
-                      onUpdateText(el.id, {
-                        x: node.x(),
-                        y: node.y(),
-                        rotation: node.rotation(),
-                        fontSize: Math.max(14, Math.round(el.fontSize * node.scaleY())),
-                      });
-                      node.scaleX(1);
-                      node.scaleY(1);
-                    }}
-                  />
-                ))}
-
-                {/* Transformer bounding box for selection mode */}
-                {!isDrawingMode && (
-                  <Transformer
-                    ref={trRef}
-                    rotateEnabled={true}
-                    enabledAnchors={[
-                      "top-left",
-                      "top-right",
-                      "bottom-left",
-                      "bottom-right",
-                    ]}
-                    boundBoxFunc={(oldBox, newBox) => {
-                      if (Math.abs(newBox.width) < 20 || Math.abs(newBox.height) < 20) {
-                        return oldBox;
-                      }
-                      return newBox;
-                    }}
-                    anchorCornerRadius={6}
-                    anchorSize={10}
-                    anchorFill="#f97316"
-                    anchorStroke="#ffffff"
-                    anchorStrokeWidth={2}
-                    borderStroke="#f97316"
-                    borderStrokeWidth={2}
-                    borderDash={[6, 4]}
-                  />
-                )}
-
-                {/* Live Brush Size Cursor Indicator on Canvas */}
-                {isDrawingMode && cursorPos.visible && (
-                  <Circle
-                    x={cursorPos.x}
-                    y={cursorPos.y}
-                    radius={brushSize / 2}
-                    stroke={activeTool === "ERASE" ? "#f43f5e" : "#10b981"}
-                    strokeWidth={2}
-                    dash={[4, 3]}
-                    fill={
-                      activeTool === "ERASE"
-                        ? "rgba(244,63,94,0.15)"
-                        : "rgba(16,185,129,0.15)"
-                    }
-                    listening={false}
-                  />
-                )}
-              </Layer>
-            </Stage>
-          </div>
-
-          {/* Active Tool Mode Badge indicator */}
-          <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-[10px] font-bold text-zinc-300 backdrop-blur-md">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                activeTool === "ERASE"
-                  ? "bg-rose-400 shadow-[0_0_8px_#f43f5e]"
-                  : activeTool === "RESTORE"
-                  ? "bg-emerald-400 shadow-[0_0_8px_#10b981]"
-                  : "bg-cyan-400"
-              }`}
-            />
-            <span>
-              {activeTool === "ERASE"
-                ? `Eraser (${brushSize}px)`
-                : activeTool === "RESTORE"
-                ? `Restore Brush (${brushSize}px)`
-                : "Select & Move"}
-            </span>
-          </div>
-
-          {/* Guide Overlay indicator */}
-          <div className="pointer-events-none absolute bottom-3 right-3 rounded-full border border-white/10 bg-black/70 px-2.5 py-1 text-[10px] font-semibold text-zinc-400 backdrop-blur-md">
-            512 × 512 px
-          </div>
+              {/* Minimalist Native Transformer */}
+              <Transformer
+                ref={transformerRef}
+                rotateEnabled
+                enabledAnchors={[
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                ]}
+                boundBoxFunc={(oldBox, newBox) => {
+                  // Prevent inverting or collapsing below 20px
+                  if (Math.abs(newBox.width) < 20 || Math.abs(newBox.height) < 20) {
+                    return oldBox;
+                  }
+                  return newBox;
+                }}
+                anchorCornerRadius={6}
+                anchorSize={14}
+                anchorFill="#ffffff"
+                anchorStroke="#2563eb"
+                anchorStrokeWidth={2}
+                borderStroke="#3b82f6"
+                borderStrokeWidth={1.5}
+                borderDash={[4, 4]}
+              />
+            </Layer>
+          </Stage>
         </div>
       </div>
     );
@@ -495,4 +494,3 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
 );
 
 CanvasEditor.displayName = "CanvasEditor";
-export default CanvasEditor;

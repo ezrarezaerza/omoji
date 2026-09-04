@@ -46,9 +46,14 @@ export async function POST(req: Request) {
     // Check if email or username is already taken
     const existingUser = await prisma.user.findFirst({
       where: {
-        email: cleanEmail,
-        username: cleanUsername,
+        OR: [
+          { email: cleanEmail },
+          { username: cleanUsername },
+        ],
       },
+    }).catch((err) => {
+      console.warn("Prisma findFirst warning, proceeding:", err?.message);
+      return null;
     });
 
     if (existingUser) {
@@ -65,17 +70,34 @@ export async function POST(req: Request) {
     }
 
     // Hash password with bcryptjs
-    const saltRounds = 12;
+    const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create the new User in PostgreSQL via Prisma
-    const newUser = await prisma.user.create({
-      data: {
-        email: cleanEmail,
-        username: cleanUsername,
-        passwordHash,
-      },
-    });
+    let newUser;
+    try {
+      // Create the new User in PostgreSQL via Prisma
+      newUser = await prisma.user.create({
+        data: {
+          email: cleanEmail,
+          username: cleanUsername,
+          passwordHash,
+        },
+      });
+    } catch (createErr: any) {
+      if (createErr.code === "P2002") {
+        const target = (createErr.meta?.target as string[]) || [];
+        const isEmail = target.some((t: string) => t.includes("email"));
+        return jsonResponse(
+          { error: isEmail ? "An account with this email already exists." : "This username is already claimed." },
+          { status: 409 }
+        );
+      }
+      console.error("Prisma user creation error in register:", createErr);
+      return jsonResponse(
+        { error: "Could not create user account. Please check your details and try again." },
+        { status: 500 }
+      );
+    }
 
     return jsonResponse(
       {
@@ -86,6 +108,7 @@ export async function POST(req: Request) {
           username: newUser.username,
           createdAt: newUser.createdAt,
         },
+        token: newUser.id,
       },
       { status: 201 }
     );
