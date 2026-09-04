@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { memoryUsers } from "@/lib/memory-store";
 
 // JSON Response helper
 const jsonResponse = (data: any, init?: { status?: number; headers?: Record<string, string> }) => {
@@ -25,8 +26,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Look up the user in PostgreSQL database via Prisma
-    const user = await prisma.user.findFirst({
+    // First try Prisma PostgreSQL
+    let user = await prisma.user.findFirst({
       where: {
         OR: [
           { email: identifier },
@@ -37,6 +38,16 @@ export async function POST(req: Request) {
       console.warn("Prisma query error in /api/auth/login:", err?.message);
       return null;
     });
+
+    // If not found in Prisma, check memory store fallback
+    if (!user) {
+      for (const memUser of memoryUsers.values()) {
+        if (memUser.email.toLowerCase() === identifier || memUser.username.toLowerCase() === identifier) {
+          user = memUser as any;
+          break;
+        }
+      }
+    }
 
     if (!user) {
       return jsonResponse(
