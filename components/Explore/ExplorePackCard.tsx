@@ -13,9 +13,11 @@ import {
   Layers,
   Smile,
   Share2,
+  Smartphone,
 } from "lucide-react";
 import { ExplorePack, ExploreSticker } from "../../src/types/explore";
 import { ReactionBurst, useReactionBurst } from "./ReactionBurst";
+import { handleStickerImageError } from "../../utils/imageHelper";
 
 interface ExplorePackCardProps {
   pack: ExplorePack;
@@ -158,6 +160,9 @@ export function ExplorePackCard({
             src={pack.trayIconUrl}
             alt={pack.title}
             className="h-14 w-14 rounded-2xl border-2 border-slate-100 dark:border-white/15 bg-slate-100 dark:bg-[#1a232a] object-contain p-1 shadow-md shrink-0"
+            crossOrigin="anonymous"
+            referrerPolicy="no-referrer"
+            onError={(e) => handleStickerImageError(e, pack.trayIconUrl)}
           />
           <div className="min-w-0 flex-1">
             <h3 className="text-base sm:text-lg font-black tracking-tight text-slate-900 dark:text-white font-['Space_Grotesk'] truncate">
@@ -202,6 +207,9 @@ export function ExplorePackCard({
                   className="h-full w-full object-contain pointer-events-none"
                   loading="lazy"
                   decoding="async"
+                  crossOrigin="anonymous"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => handleStickerImageError(e, sticker.imageUrl)}
                   style={{ contentVisibility: "auto" }}
                 />
                 {/* Emoji badge */}
@@ -236,9 +244,9 @@ export function ExplorePackCard({
           {isExporting ? (
             <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black border-t-transparent" />
           ) : (
-            <Download className="h-3.5 w-3.5 stroke-[2.5]" />
+            <Smartphone className="h-3.5 w-3.5 stroke-[2.5]" />
           )}
-          <span>Get .wastickers</span>
+          <span>Add to WhatsApp</span>
         </button>
 
         {/* Clone / Open in 30-slot Studio */}

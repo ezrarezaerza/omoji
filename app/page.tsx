@@ -35,6 +35,7 @@ import {
 import { StickerPackRecord } from "../src/types/pack";
 import { saveStickerToSlot, fetchPackDetails } from "../utils/packApi";
 import { createWaStickersArchive } from "../utils/createWaStickers";
+import { WhatsAppHandoffModal } from "../components/Packs/WhatsAppHandoffModal";
 
 export default function HomePage() {
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -42,6 +43,7 @@ export default function HomePage() {
   const [currentTab, setCurrentTab] = useState<"studio" | "explore">("studio");
   const [selectedPack, setSelectedPack] = useState<StickerPackRecord | null>(null);
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
+  const [handoffPack, setHandoffPack] = useState<StickerPackRecord | null>(null);
   const [activeUser, setActiveUser] = useState<{ id: string; email: string; username: string } | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [initialImageUrl, setInitialImageUrl] = useState<string | null>(null);
@@ -161,6 +163,30 @@ export default function HomePage() {
       }
     } catch (e) {
       console.warn("Could not restore session:", e);
+    }
+  }, []);
+
+  // Listen for mobile QR handoff or external deep links (e.g., ?action=add-to-whatsapp&packId=...)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const action = urlParams.get("action");
+      const packId = urlParams.get("packId");
+
+      if (packId) {
+        fetchPackDetails(packId).then((pack) => {
+          if (pack) {
+            setSelectedPack(pack);
+            if (action === "add-to-whatsapp") {
+              setHandoffPack(pack);
+              setCurrentTab("studio");
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Error parsing URL parameters:", e);
     }
   }, []);
 
@@ -333,45 +359,7 @@ export default function HomePage() {
   }, [persistStudioState]);
 
   const handleExportPack = async (pack: StickerPackRecord) => {
-    if (!pack.stickers || pack.stickers.length < 3) {
-      setAuthNotice("WhatsApp sticker packs require at least 3 stickers to export.");
-      setTimeout(() => setAuthNotice(null), 4000);
-      return;
-    }
-
-    setIsExportingPack(true);
-    setAuthNotice(`Generating .wastickers package for "${pack.title}"...`);
-
-    try {
-      const stickerUrls = pack.stickers.map((s) => s.imageUrl);
-      const zipBlob = await createWaStickersArchive({
-        packName: pack.title,
-        authorName: pack.publisher || "Omoji Creator",
-        stickers: stickerUrls,
-        trayIcon: pack.trayIconUrl,
-        animated: pack.stickers.some((s) => s.isAnimated),
-      });
-
-      const blobUrl = URL.createObjectURL(zipBlob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      const safeFilename = (pack.title || "sticker_pack")
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "_");
-      a.download = `${safeFilename}.wastickers`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-
-      setAuthNotice(`Exported ${pack.title}.wastickers successfully!`);
-    } catch (err: any) {
-      console.error("Pack export failed:", err);
-      setAuthNotice(err.message || "Failed to export .wastickers package.");
-    } finally {
-      setIsExportingPack(false);
-      setTimeout(() => setAuthNotice(null), 4000);
-    }
+    setHandoffPack(pack);
   };
 
   const handleTabChange = (tab: "studio" | "explore") => {
@@ -759,6 +747,20 @@ export default function HomePage() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Global Add to WhatsApp Handoff Modal */}
+      {handoffPack && (
+        <WhatsAppHandoffModal
+          isOpen={Boolean(handoffPack)}
+          onClose={() => setHandoffPack(null)}
+          pack={handoffPack}
+          onNavigateToSlot={(slotIndex) => {
+            setSelectedPack(handoffPack);
+            handleOpenEditorForSlot(handoffPack, slotIndex);
+            setHandoffPack(null);
+          }}
+        />
+      )}
 
       {/* Footer info */}
       <footer className="mt-16 border-t border-slate-200/80 dark:border-white/10 pt-6 text-center text-xs font-medium text-slate-500 dark:text-slate-400">

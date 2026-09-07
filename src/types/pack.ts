@@ -96,3 +96,82 @@ export interface SlotCommitResponse {
   sticker: StickerRecord;
   pack: StickerPackRecord;
 }
+
+/**
+ * WhatsApp Official Sticker Provider Specification Types
+ * Reference: WhatsApp/stickers official specification & contents.json standard
+ */
+export interface WhatsAppStickerItemSpec {
+  image_file: string;
+  image_url?: string;
+  emojis: string[];
+  accessibility_text?: string;
+  file_size_bytes?: number;
+  is_animated?: boolean;
+}
+
+export interface WhatsAppPackSpec {
+  identifier: string;
+  name: string;
+  publisher: string;
+  tray_image_file: string;
+  tray_image_url?: string;
+  publisher_email?: string;
+  publisher_website?: string;
+  privacy_policy_website?: string;
+  license_agreement_website?: string;
+  image_data_version: string;
+  avoid_cache: boolean;
+  animated_sticker_pack: boolean;
+  stickers: WhatsAppStickerItemSpec[];
+}
+
+export interface WhatsAppContentsJson {
+  android_play_store_link: string;
+  ios_app_store_link: string;
+  sticker_packs: WhatsAppPackSpec[];
+}
+
+export interface WhatsAppManifestDiagnostics {
+  status: "compliant" | "warning" | "non_compliant";
+  is_ready_for_whatsapp: boolean;
+  total_stickers: number;
+  min_required: number;
+  max_allowed: number;
+  is_count_valid: boolean;
+  is_animated_pack: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface WhatsAppManifestResponse {
+  success: boolean;
+  meta: {
+    spec_version: string;
+    standard: string;
+    generated_at: string;
+  };
+  diagnostics: WhatsAppManifestDiagnostics;
+  pack: WhatsAppPackSpec;
+  contents: WhatsAppContentsJson;
+  integration: {
+    android: {
+      action: string;
+      package: string;
+      authority: string;
+      pack_id: string;
+      intent_uri: string;
+    };
+    ios: {
+      url_scheme: string;
+      pasteboard_key: string;
+      identifier: string;
+    };
+    endpoints: {
+      manifest_url: string;
+      raw_contents_url: string;
+      download_wastickers_url: string;
+    };
+  };
+}
+

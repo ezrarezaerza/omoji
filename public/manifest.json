@@ -26,6 +26,13 @@
       "description": "View your saved sticker projects",
       "url": "/?action=drafts",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Explore Community Packs",
+      "short_name": "Explore",
+      "description": "Browse and download curated WhatsApp sticker packs",
+      "url": "/?tab=explore",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ],
   "icons": [

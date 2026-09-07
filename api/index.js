@@ -257,6 +257,7 @@ async function GET2(req) {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
         "Access-Control-Allow-Headers": "*",
+        "Cross-Origin-Resource-Policy": "cross-origin",
         "Cache-Control": "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800",
         "Content-Length": String(arrayBuffer.byteLength)
       }
@@ -739,9 +740,187 @@ async function DELETE2(req, context) {
   }
 }
 
+// app/api/packs/[packId]/whatsapp-manifest/route.ts
+var jsonResponse3 = (data, init) => {
+  return new Response(JSON.stringify(data, null, 2), {
+    status: init?.status || 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "*",
+      "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+      ...init?.headers || {}
+    }
+  });
+};
+var DEFAULT_EMOJI_LIST = ["\u2728", "\u{1F525}", "\u{1F60E}", "\u{1F602}", "\u{1F680}", "\u2764\uFE0F", "\u{1F44D}", "\u{1F973}", "\u{1F389}", "\u{1F44F}"];
+async function GET5(req, context) {
+  try {
+    let packId = context?.params?.packId;
+    const url = new URL(req.url);
+    if (!packId) {
+      const segments = url.pathname.split("/").filter(Boolean);
+      const packsIndex = segments.indexOf("packs");
+      if (packsIndex !== -1 && segments[packsIndex + 1]) {
+        packId = segments[packsIndex + 1];
+      }
+    }
+    if (!packId) {
+      return jsonResponse3({ error: "Pack ID is required." }, { status: 400 });
+    }
+    const format = url.searchParams.get("format")?.toLowerCase();
+    const pack = await prisma.stickerPack.findUnique({
+      where: { id: packId },
+      include: {
+        stickers: {
+          orderBy: { slotIndex: "asc" }
+        },
+        author: {
+          select: {
+            id: true,
+            username: true,
+            email: true
+          }
+        }
+      }
+    });
+    if (!pack) {
+      return jsonResponse3({ error: "Sticker pack not found." }, { status: 404 });
+    }
+    const host = url.host || "localhost:3000";
+    const protocol = url.protocol || "https:";
+    const baseUrl = `${protocol}//${host}`;
+    const rawIdentifier = `omoji_${pack.id.replace(/[^a-zA-Z0-9_]/g, "_")}`.slice(0, 128);
+    const packName = (pack.title || "Untitled Pack").trim().slice(0, 128);
+    const publisherName = (pack.publisher || pack.author?.username || "Omoji Creator").trim().slice(0, 128);
+    const errors = [];
+    const warnings = [];
+    const totalStickers = pack.stickers.length;
+    if (totalStickers < 3) {
+      errors.push(`WhatsApp requires at least 3 stickers in a pack. Currently has ${totalStickers}.`);
+    }
+    if (totalStickers > 30) {
+      warnings.push(`WhatsApp allows a maximum of 30 stickers per pack. The pack contains ${totalStickers}; only the first 30 will be imported.`);
+    }
+    const isAnimatedPack = pack.stickers.some((s) => s.isAnimated);
+    const validStickersList = pack.stickers.slice(0, 30).map((sticker, idx) => {
+      const fileName = `${idx + 1}.webp`;
+      let stickerEmojis = Array.isArray(sticker.emojis) && sticker.emojis.length > 0 ? sticker.emojis.slice(0, 3) : [DEFAULT_EMOJI_LIST[idx % DEFAULT_EMOJI_LIST.length]];
+      if (sticker.fileSize && sticker.fileSize > 0) {
+        const maxBytes = sticker.isAnimated ? 500 * 1024 : 100 * 1024;
+        if (sticker.fileSize > maxBytes) {
+          warnings.push(
+            `Sticker #${idx + 1} (${Math.round(sticker.fileSize / 1024)} KB) exceeds WhatsApp ${sticker.isAnimated ? "animated (500 KB)" : "static (100 KB)"} threshold. Optimize before importing.`
+          );
+        }
+      }
+      let absoluteImageUrl = sticker.imageUrl;
+      if (absoluteImageUrl && absoluteImageUrl.startsWith("/")) {
+        absoluteImageUrl = `${baseUrl}${absoluteImageUrl}`;
+      }
+      return {
+        image_file: fileName,
+        image_url: absoluteImageUrl,
+        emojis: stickerEmojis,
+        accessibility_text: `${packName} Sticker #${idx + 1}`,
+        file_size_bytes: sticker.fileSize || void 0,
+        is_animated: Boolean(sticker.isAnimated)
+      };
+    });
+    let absoluteTrayIconUrl = pack.trayIconUrl;
+    if (absoluteTrayIconUrl && absoluteTrayIconUrl.startsWith("/")) {
+      absoluteTrayIconUrl = `${baseUrl}${absoluteTrayIconUrl}`;
+    }
+    const officialPackObject = {
+      identifier: rawIdentifier,
+      name: packName,
+      publisher: publisherName,
+      tray_image_file: "tray_icon.png",
+      tray_image_url: absoluteTrayIconUrl,
+      publisher_email: pack.author?.email || "support@omoji.app",
+      publisher_website: `${baseUrl}/packs/${pack.id}`,
+      privacy_policy_website: `${baseUrl}/privacy`,
+      license_agreement_website: `${baseUrl}/terms`,
+      image_data_version: String(pack.updatedAt ? new Date(pack.updatedAt).getTime() : "1"),
+      avoid_cache: false,
+      animated_sticker_pack: isAnimatedPack,
+      stickers: validStickersList
+    };
+    const officialContentsJson = {
+      android_play_store_link: "",
+      ios_app_store_link: "",
+      sticker_packs: [officialPackObject]
+    };
+    if (format === "contents.json" || format === "contents" || format === "raw") {
+      return jsonResponse3(officialContentsJson);
+    }
+    const isReadyForWhatsApp = errors.length === 0 && totalStickers >= 3;
+    const status = errors.length > 0 ? "non_compliant" : warnings.length > 0 ? "warning" : "compliant";
+    const androidAuthority = "com.omoji.stickers.provider";
+    const androidIntentUri = `intent://#Intent;action=com.whatsapp.intent.action.ENABLE_STICKER_PACK;package=com.whatsapp;S.extra_sticker_pack_id=${encodeURIComponent(
+      rawIdentifier
+    )};S.extra_sticker_pack_authority=${encodeURIComponent(
+      androidAuthority
+    )};S.extra_sticker_pack_name=${encodeURIComponent(packName)};end`;
+    const iosUrlScheme = `whatsapp://stickerPack?authority=${encodeURIComponent(
+      androidAuthority
+    )}&identifier=${encodeURIComponent(rawIdentifier)}`;
+    return jsonResponse3({
+      success: true,
+      meta: {
+        spec_version: "1.0",
+        standard: "WhatsApp/stickers Official Specification",
+        generated_at: (/* @__PURE__ */ new Date()).toISOString()
+      },
+      diagnostics: {
+        status,
+        is_ready_for_whatsapp: isReadyForWhatsApp,
+        total_stickers: totalStickers,
+        min_required: 3,
+        max_allowed: 30,
+        is_count_valid: totalStickers >= 3 && totalStickers <= 30,
+        is_animated_pack: isAnimatedPack,
+        errors,
+        warnings
+      },
+      pack: officialPackObject,
+      contents: officialContentsJson,
+      integration: {
+        android: {
+          action: "com.whatsapp.intent.action.ENABLE_STICKER_PACK",
+          package: "com.whatsapp",
+          authority: androidAuthority,
+          pack_id: rawIdentifier,
+          intent_uri: androidIntentUri
+        },
+        ios: {
+          url_scheme: iosUrlScheme,
+          pasteboard_key: "net.whatsapp.WhatsApp.stickerpack",
+          identifier: rawIdentifier
+        },
+        endpoints: {
+          manifest_url: `${baseUrl}/api/packs/${pack.id}/whatsapp-manifest`,
+          raw_contents_url: `${baseUrl}/api/packs/${pack.id}/whatsapp-manifest?format=contents.json`,
+          download_wastickers_url: `${baseUrl}/api/packs/${pack.id}?format=wastickers`
+        }
+      }
+    });
+  } catch (error) {
+    console.error("WhatsApp manifest generation error:", error);
+    return jsonResponse3(
+      {
+        error: "Failed to generate WhatsApp sticker manifest.",
+        details: error?.message || String(error)
+      },
+      { status: 500 }
+    );
+  }
+}
+
 // app/api/packs/[packId]/stickers/[slotIndex]/route.ts
 import { put as put3 } from "@vercel/blob";
-var jsonResponse3 = (data, init) => {
+var jsonResponse4 = (data, init) => {
   return new Response(JSON.stringify(data), {
     status: init?.status || 200,
     headers: {
@@ -772,10 +951,10 @@ async function POST2(req, context) {
     const user = await getOrCreateSessionUser(req);
     const { packId, slotIndex } = parseParams(req, context);
     if (!packId) {
-      return jsonResponse3({ error: "Pack ID is required." }, { status: 400 });
+      return jsonResponse4({ error: "Pack ID is required." }, { status: 400 });
     }
     if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 29) {
-      return jsonResponse3(
+      return jsonResponse4(
         { error: "Invalid slotIndex. Slot index must be an integer between 0 and 29." },
         { status: 400 }
       );
@@ -784,7 +963,7 @@ async function POST2(req, context) {
       where: { id: packId }
     });
     if (!pack) {
-      return jsonResponse3({ error: "Sticker pack not found." }, { status: 404 });
+      return jsonResponse4({ error: "Sticker pack not found." }, { status: 404 });
     }
     const contentType = req.headers.get("content-type") || "";
     let imageUrl = "";
@@ -832,7 +1011,7 @@ async function POST2(req, context) {
       if (typeof body.fileSize === "number") fileSize = body.fileSize;
     }
     if (!imageUrl) {
-      return jsonResponse3(
+      return jsonResponse4(
         { error: "A valid sticker image file or imageUrl is required." },
         { status: 400 }
       );
@@ -902,7 +1081,7 @@ async function POST2(req, context) {
         }
       }
     });
-    return jsonResponse3(
+    return jsonResponse4(
       {
         message: `Sticker successfully saved to slot ${slotIndex + 1}!`,
         sticker,
@@ -912,7 +1091,7 @@ async function POST2(req, context) {
     );
   } catch (error) {
     console.error("Error committing sticker to slot:", error);
-    return jsonResponse3(
+    return jsonResponse4(
       { error: "Failed to save sticker to slot.", details: error?.message },
       { status: 500 }
     );
@@ -922,10 +1101,10 @@ async function DELETE3(req, context) {
   try {
     const { packId, slotIndex } = parseParams(req, context);
     if (!packId) {
-      return jsonResponse3({ error: "Pack ID is required." }, { status: 400 });
+      return jsonResponse4({ error: "Pack ID is required." }, { status: 400 });
     }
     if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 29) {
-      return jsonResponse3(
+      return jsonResponse4(
         { error: "Invalid slotIndex. Must be between 0 and 29." },
         { status: 400 }
       );
@@ -953,14 +1132,14 @@ async function DELETE3(req, context) {
         }
       }
     });
-    return jsonResponse3({
+    return jsonResponse4({
       message: `Sticker cleared from slot ${slotIndex + 1}.`,
       pack: updatedPack,
       slotIndex
     });
   } catch (error) {
     console.error("Error removing sticker from slot:", error);
-    return jsonResponse3(
+    return jsonResponse4(
       { error: "Failed to clear sticker from slot.", details: error?.message },
       { status: 500 }
     );
@@ -969,7 +1148,7 @@ async function DELETE3(req, context) {
 
 // app/api/auth/register/route.ts
 import bcrypt from "bcryptjs";
-var jsonResponse4 = (data, init) => {
+var jsonResponse5 = (data, init) => {
   return new Response(JSON.stringify(data), {
     status: init?.status || 200,
     headers: {
@@ -983,7 +1162,7 @@ async function POST3(req) {
     const body = await req.json().catch(() => ({}));
     const { email, username, password } = body;
     if (!email || !username || !password) {
-      return jsonResponse4(
+      return jsonResponse5(
         { error: "Email, username, and password are required." },
         { status: 400 }
       );
@@ -991,13 +1170,13 @@ async function POST3(req) {
     const cleanEmail = email.trim().toLowerCase();
     const cleanUsername = username.trim().toLowerCase();
     if (password.length < 6) {
-      return jsonResponse4(
+      return jsonResponse5(
         { error: "Password must be at least 6 characters long." },
         { status: 400 }
       );
     }
     if (!cleanEmail.includes("@") || !cleanEmail.includes(".")) {
-      return jsonResponse4(
+      return jsonResponse5(
         { error: "Please provide a valid email address." },
         { status: 400 }
       );
@@ -1015,12 +1194,12 @@ async function POST3(req) {
     });
     if (existingUser) {
       if (existingUser.email === cleanEmail) {
-        return jsonResponse4(
+        return jsonResponse5(
           { error: "An account with this email already exists." },
           { status: 409 }
         );
       }
-      return jsonResponse4(
+      return jsonResponse5(
         { error: "This username is already claimed." },
         { status: 409 }
       );
@@ -1040,18 +1219,18 @@ async function POST3(req) {
       if (createErr.code === "P2002") {
         const target = createErr.meta?.target || [];
         const isEmail = target.some((t) => t.includes("email"));
-        return jsonResponse4(
+        return jsonResponse5(
           { error: isEmail ? "An account with this email already exists." : "This username is already claimed." },
           { status: 409 }
         );
       }
       console.error("Prisma user creation error in register:", createErr);
-      return jsonResponse4(
+      return jsonResponse5(
         { error: "Could not create user account. Please check your details and try again." },
         { status: 500 }
       );
     }
-    return jsonResponse4(
+    return jsonResponse5(
       {
         message: "User registered successfully",
         user: {
@@ -1066,7 +1245,7 @@ async function POST3(req) {
     );
   } catch (error) {
     console.error("Registration error:", error);
-    return jsonResponse4(
+    return jsonResponse5(
       { error: error?.message || "Internal server error during registration." },
       { status: 500 }
     );
@@ -1075,7 +1254,7 @@ async function POST3(req) {
 
 // app/api/auth/login/route.ts
 import bcrypt2 from "bcryptjs";
-var jsonResponse5 = (data, init) => {
+var jsonResponse6 = (data, init) => {
   return new Response(JSON.stringify(data), {
     status: init?.status || 200,
     headers: {
@@ -1090,7 +1269,7 @@ async function POST4(req) {
     const identifier = (body.email || body.username || body.identifier || "").trim().toLowerCase();
     const password = body.password || "";
     if (!identifier || !password) {
-      return jsonResponse5(
+      return jsonResponse6(
         { error: "Please provide your email/username and password." },
         { status: 400 }
       );
@@ -1107,20 +1286,20 @@ async function POST4(req) {
       return null;
     });
     if (!user) {
-      return jsonResponse5(
+      return jsonResponse6(
         { error: "No account found with this email or username." },
         { status: 401 }
       );
     }
     if (!user.passwordHash) {
-      return jsonResponse5(
+      return jsonResponse6(
         { error: "Invalid account configuration. Please reset your credentials." },
         { status: 401 }
       );
     }
     const isPasswordValid = await bcrypt2.compare(password, user.passwordHash);
     if (!isPasswordValid) {
-      return jsonResponse5(
+      return jsonResponse6(
         { error: "Incorrect password. Please try again." },
         { status: 401 }
       );
@@ -1131,7 +1310,7 @@ async function POST4(req) {
       username: user.username,
       createdAt: user.createdAt
     };
-    return jsonResponse5(
+    return jsonResponse6(
       {
         message: "Login successful",
         user: safeUser,
@@ -1141,7 +1320,7 @@ async function POST4(req) {
     );
   } catch (error) {
     console.error("Login route error:", error);
-    return jsonResponse5(
+    return jsonResponse6(
       { error: error?.message || "Internal server error during authentication." },
       { status: 500 }
     );
@@ -1149,7 +1328,7 @@ async function POST4(req) {
 }
 
 // app/api/auth/me/route.ts
-var jsonResponse6 = (data, init) => {
+var jsonResponse7 = (data, init) => {
   return new Response(JSON.stringify(data), {
     status: init?.status || 200,
     headers: {
@@ -1158,7 +1337,7 @@ var jsonResponse6 = (data, init) => {
     }
   });
 };
-async function GET5(req) {
+async function GET6(req) {
   try {
     const authHeader = req.headers.get("authorization");
     const userIdHeader = req.headers.get("x-user-id");
@@ -1167,7 +1346,7 @@ async function GET5(req) {
       userId = authHeader.substring(7);
     }
     if (!userId || userId === "null" || userId === "undefined") {
-      return jsonResponse6({ error: "Unauthorized" }, { status: 401 });
+      return jsonResponse7({ error: "Unauthorized" }, { status: 401 });
     }
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -1179,11 +1358,11 @@ async function GET5(req) {
       }
     }).catch(() => null);
     if (!user) {
-      return jsonResponse6({ error: "User session not found" }, { status: 404 });
+      return jsonResponse7({ error: "User session not found" }, { status: 404 });
     }
-    return jsonResponse6({ user }, { status: 200 });
+    return jsonResponse7({ user }, { status: 200 });
   } catch (error) {
-    return jsonResponse6(
+    return jsonResponse7(
       { error: error?.message || "Internal server error" },
       { status: 500 }
     );
@@ -1192,7 +1371,7 @@ async function GET5(req) {
 
 // app/api/auth/[...nextauth]/route.ts
 import bcrypt3 from "bcryptjs";
-async function GET6(request) {
+async function GET7(request) {
   const url = new URL(request.url);
   const path2 = url.pathname;
   if (path2.includes("/session")) {
@@ -1304,7 +1483,7 @@ async function POST5(request) {
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-var jsonResponse7 = (data, init) => {
+var jsonResponse8 = (data, init) => {
   return new Response(JSON.stringify(data), {
     status: init?.status || 200,
     headers: {
@@ -1323,7 +1502,7 @@ async function POST6(req) {
       const body = await req.json();
       const rawData = body.image || "";
       if (!rawData) {
-        return jsonResponse7({ success: false, error: "Missing image field" }, { status: 400 });
+        return jsonResponse8({ success: false, error: "Missing image field" }, { status: 400 });
       }
       const match = rawData.match(/^data:image\/(\w+);base64,(.+)$/);
       if (match) {
@@ -1346,7 +1525,7 @@ async function POST6(req) {
       }
     }
     if (!imageBuffer || imageBuffer.length === 0) {
-      return jsonResponse7({ success: false, error: "No valid image data received" }, { status: 400 });
+      return jsonResponse8({ success: false, error: "No valid image data received" }, { status: 400 });
     }
     const ext = mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpg" : mimeType.includes("webp") ? "webp" : "png";
     const tempFileName = `cutout_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
@@ -1362,14 +1541,14 @@ async function POST6(req) {
     const outputArrayBuffer = await resultBlob.arrayBuffer();
     const outputBuffer = Buffer.from(outputArrayBuffer);
     const resultBase64 = `data:image/png;base64,${outputBuffer.toString("base64")}`;
-    return jsonResponse7({
+    return jsonResponse8({
       success: true,
       imageUrl: resultBase64,
       size: outputBuffer.length
     });
   } catch (error) {
     console.error("Neural background removal server error:", error);
-    return jsonResponse7(
+    return jsonResponse8(
       {
         success: false,
         error: error.message || "Failed to remove background"
@@ -1438,7 +1617,6 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use((_req, res, next) => {
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-  res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
   next();
 });
 var apiRouter = express.Router();
@@ -1471,6 +1649,9 @@ apiRouter.delete("/packs/:packId/stickers/:slotIndex", (req, res) => {
     res
   );
 });
+apiRouter.get("/packs/:packId/whatsapp-manifest", (req, res) => {
+  return adaptWebHandler((r) => GET5(r, { params: { packId: req.params.packId } }), req, res);
+});
 apiRouter.get("/packs/:packId", (req, res) => {
   return adaptWebHandler((r) => GET4(r, { params: { packId: req.params.packId } }), req, res);
 });
@@ -1499,13 +1680,13 @@ apiRouter.post("/auth/login", (req, res) => {
   return adaptWebHandler(POST4, req, res);
 });
 apiRouter.get("/auth/me", (req, res) => {
-  return adaptWebHandler(GET5, req, res);
+  return adaptWebHandler(GET6, req, res);
 });
 apiRouter.get("/auth/session", (req, res) => {
-  return adaptWebHandler(GET5, req, res);
+  return adaptWebHandler(GET6, req, res);
 });
 apiRouter.get("/auth/*", (req, res) => {
-  return adaptWebHandler(GET6, req, res);
+  return adaptWebHandler(GET7, req, res);
 });
 apiRouter.post("/auth/*", (req, res) => {
   return adaptWebHandler(POST5, req, res);

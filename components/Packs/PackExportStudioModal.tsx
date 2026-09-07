@@ -38,6 +38,8 @@ import {
   canWebShareFiles,
 } from "../../utils/whatsappTransfer";
 import { formatBytes } from "../../utils/whatsappValidator";
+import { WhatsAppHandoffModal } from "./WhatsAppHandoffModal";
+import { handleStickerImageError } from "../../utils/imageHelper";
 
 interface PackExportStudioModalProps {
   isOpen: boolean;
@@ -58,6 +60,7 @@ export function PackExportStudioModal({
   const [exportStep, setExportStep] = useState<string>("");
   const [exportPercent, setExportPercent] = useState<number>(0);
   const [autoOptimize, setAutoOptimize] = useState(true);
+  const [isHandoffOpen, setIsHandoffOpen] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
@@ -421,15 +424,27 @@ export function PackExportStudioModal({
                         </p>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={handleExportWastickers}
-                        disabled={occupiedCount < 3}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#25D366] px-6 py-3.5 text-xs font-black text-white shadow-xl shadow-emerald-600/30 hover:brightness-105 active:scale-95 transition-all disabled:opacity-40 cursor-pointer shrink-0"
-                      >
-                        <Download className="h-4 w-4 stroke-[2.5]" />
-                        <span>Export Pack ({occupiedCount} Stickers)</span>
-                      </button>
+                      <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setIsHandoffOpen(true)}
+                          disabled={occupiedCount < 3}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#25D366] px-5 py-3.5 text-xs font-black text-black shadow-xl shadow-emerald-600/30 hover:bg-[#20bd5a] active:scale-95 transition-all disabled:opacity-40 cursor-pointer w-full sm:w-auto font-['Space_Grotesk']"
+                        >
+                          <Smartphone className="h-4 w-4 stroke-[2.5]" />
+                          <span>1-Tap Add to WhatsApp</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleExportWastickers}
+                          disabled={occupiedCount < 3}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-white/80 dark:bg-zinc-900/80 px-5 py-3.5 text-xs font-black text-emerald-800 dark:text-emerald-300 shadow-sm hover:bg-emerald-500/10 active:scale-95 transition-all disabled:opacity-40 cursor-pointer w-full sm:w-auto"
+                        >
+                          <Download className="h-4 w-4 stroke-[2.5]" />
+                          <span>Download .wastickers</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -559,6 +574,11 @@ export function PackExportStudioModal({
                         src={stickers[selectedStickerIndex].imageUrl}
                         alt="WhatsApp Sticker Preview"
                         className="h-full w-full object-contain filter drop-shadow-md"
+                        crossOrigin="anonymous"
+                        referrerPolicy="no-referrer"
+                        onError={(e) =>
+                          handleStickerImageError(e, stickers[selectedStickerIndex]?.imageUrl)
+                        }
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center rounded-2xl bg-black/5 dark:bg-white/5 text-slate-400 text-xs">
@@ -591,6 +611,9 @@ export function PackExportStudioModal({
                         src={s.imageUrl}
                         alt={`Slot ${idx + 1}`}
                         className="h-full w-full object-contain"
+                        crossOrigin="anonymous"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => handleStickerImageError(e, s.imageUrl)}
                       />
                       <span className="absolute top-1 left-1 rounded-md bg-black/60 px-1 text-[8px] font-bold text-white">
                         #{idx + 1}
@@ -628,6 +651,11 @@ export function PackExportStudioModal({
                         src={stickers[selectedStickerIndex].imageUrl}
                         alt="Selected Sticker"
                         className="h-full w-full object-contain"
+                        crossOrigin="anonymous"
+                        referrerPolicy="no-referrer"
+                        onError={(e) =>
+                          handleStickerImageError(e, stickers[selectedStickerIndex]?.imageUrl)
+                        }
                       />
                     ) : (
                       <span className="text-xs text-slate-400">Empty slot</span>
@@ -780,6 +808,12 @@ export function PackExportStudioModal({
           </div>
         </div>
       </div>
+
+      <WhatsAppHandoffModal
+        isOpen={isHandoffOpen}
+        onClose={() => setIsHandoffOpen(false)}
+        pack={pack}
+      />
     </ResponsiveDialog>
   );
 }

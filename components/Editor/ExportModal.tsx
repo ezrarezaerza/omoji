@@ -36,6 +36,7 @@ import {
   exportSingleSticker,
   StickerItemExport,
 } from "../../utils/packExporter";
+import { handleStickerImageError } from "../../utils/imageHelper";
 import {
   validateWhatsAppPack,
   WhatsAppPackDiagnostics,
@@ -859,6 +860,9 @@ export function ExportModal({
                             src={previewUrl}
                             alt={`Sticker ${idx + 1}`}
                             className="h-full w-full object-contain"
+                            crossOrigin="anonymous"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => handleStickerImageError(e, previewUrl)}
                           />
                           <span className="absolute top-1 left-1 rounded bg-black/70 px-1 text-[9px] font-bold text-white">
                             #{idx + 1}

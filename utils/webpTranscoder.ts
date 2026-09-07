@@ -72,6 +72,32 @@ export async function sanitizeAndTranscodeToWhatsAppWebP(
       };
 
       img.onerror = (err) => {
+        if (
+          typeof objectUrl === "string" &&
+          (objectUrl.startsWith("http://") || objectUrl.startsWith("https://")) &&
+          !objectUrl.includes("/api/proxy-image")
+        ) {
+          const fallbackImg = new Image();
+          fallbackImg.crossOrigin = "anonymous";
+          fallbackImg.onload = () => {
+            const c = document.createElement("canvas");
+            c.width = fallbackImg.naturalWidth || fallbackImg.width;
+            c.height = fallbackImg.naturalHeight || fallbackImg.height;
+            const ctx = c.getContext("2d");
+            if (!ctx) {
+              reject(new Error("Unable to obtain 2D rendering context."));
+              return;
+            }
+            ctx.drawImage(fallbackImg, 0, 0);
+            resolve(c);
+          };
+          fallbackImg.onerror = (fErr) => {
+            reject(new Error(`Failed to load source image via proxy: ${fErr}`));
+          };
+          fallbackImg.src = `/api/proxy-image?url=${encodeURIComponent(objectUrl)}`;
+          return;
+        }
+
         if (source instanceof Blob) URL.revokeObjectURL(objectUrl);
         reject(new Error(`Failed to load source image: ${err}`));
       };

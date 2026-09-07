@@ -37,8 +37,20 @@ async function resolveStickerBlob(source: Blob | string): Promise<Blob> {
       return dataUrlToBlob(source);
     }
     if (source.startsWith("blob:") || source.startsWith("http://") || source.startsWith("https://")) {
-      const response = await fetch(source);
-      return await response.blob();
+      try {
+        const response = await fetch(source);
+        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+        return await response.blob();
+      } catch {
+        // Fall back to same-origin proxy if direct CORS fetch fails
+        if (source.startsWith("http://") || source.startsWith("https://")) {
+          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(source)}`;
+          const proxyRes = await fetch(proxyUrl);
+          if (proxyRes.ok) {
+            return await proxyRes.blob();
+          }
+        }
+      }
     }
     return dataUrlToBlob(source);
   }
@@ -101,7 +113,7 @@ export async function createWaStickersArchive({
     });
   }
 
-  // 4. Generate metadata.json (Official WhatsApp Sticker pack manifest standard)
+  // 4. Generate metadata.json (Bridge app standard) and contents.json (Official WhatsApp Standard)
   const metadata: WaStickerMetadata = {
     name: packName,
     publisher: authorName,
@@ -113,6 +125,34 @@ export async function createWaStickersArchive({
   };
 
   zip.file("metadata.json", JSON.stringify(metadata, null, 2));
+
+  // Official WhatsApp Schema contents.json (WhatsApp/stickers specification)
+  const sanitizedIdentifier = (packName || "pack")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .slice(0, 128);
+
+  const officialContents = {
+    android_play_store_link: "",
+    ios_app_store_link: "",
+    sticker_packs: [
+      {
+        identifier: sanitizedIdentifier,
+        name: packName.slice(0, 128),
+        publisher: authorName.slice(0, 128),
+        tray_image_file: "tray_icon.png",
+        image_data_version: "1",
+        avoid_cache: false,
+        animated_sticker_pack: hasAnimatedStickers,
+        stickers: stickerMetadataList.map((s) => ({
+          image_file: s["image-file"],
+          emojis: s.emojis,
+        })),
+      },
+    ],
+  };
+
+  zip.file("contents.json", JSON.stringify(officialContents, null, 2));
 
   // 5. Generate binary zip Blob with compression
   const wastickersBlob = await zip.generateAsync({

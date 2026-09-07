@@ -19,6 +19,8 @@ import {
   Plus,
   Info,
   Globe,
+  FileCode2,
+  Smartphone,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { StickerPackRecord, StickerRecord } from "../../src/types/pack";
@@ -27,6 +29,8 @@ import { EditPackModal } from "./EditPackModal";
 import { BatchValidationModal } from "./BatchValidationModal";
 import { PackExportStudioModal } from "./PackExportStudioModal";
 import { BatchSlotActions } from "./BatchSlotActions";
+import { WhatsAppManifestModal } from "./WhatsAppManifestModal";
+import { WhatsAppHandoffModal } from "./WhatsAppHandoffModal";
 import { PublishPackModal } from "../Creator/PublishPackModal";
 import { SharePackModal } from "../Creator/SharePackModal";
 import { getCustomPublishedPacks } from "../../utils/exploreDb";
@@ -43,6 +47,7 @@ import {
   deleteSlotDraft,
   StickerDraft,
 } from "../../utils/draftsDb";
+import { handleStickerImageError } from "../../utils/imageHelper";
 import { createWaStickersArchive } from "../../utils/createWaStickers";
 
 interface PackDetailStudioProps {
@@ -74,6 +79,8 @@ export function PackDetailStudio({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
   const [isExportStudioModalOpen, setIsExportStudioModalOpen] = useState(false);
+  const [isManifestModalOpen, setIsManifestModalOpen] = useState(false);
+  const [isWhatsAppHandoffOpen, setIsWhatsAppHandoffOpen] = useState(false);
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isPublished, setIsPublished] = useState(false);
@@ -312,6 +319,9 @@ export function PackDetailStudio({
                   src={pack.trayIconUrl}
                   alt={pack.title}
                   className="h-full w-full object-contain p-1"
+                  crossOrigin="anonymous"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => handleStickerImageError(e, pack.trayIconUrl)}
                 />
               ) : (
                 <Package className="h-6 w-6 text-emerald-600 dark:text-[#25D366]" />
@@ -359,6 +369,16 @@ export function PackDetailStudio({
             <span>Validate Spec</span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => setIsManifestModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-2xl border border-slate-200 dark:border-white/15 bg-white dark:bg-white/5 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all shadow-xs cursor-pointer"
+            title="View WhatsApp Sticker Manifest (contents.json)"
+          >
+            <FileCode2 className="h-4 w-4 text-emerald-500" />
+            <span>WhatsApp Manifest</span>
+          </button>
+
           {/* Publish to Community Explore */}
           <button
             type="button"
@@ -384,6 +404,17 @@ export function PackDetailStudio({
           >
             <Share2 className="h-4 w-4 text-[#25D366]" />
             <span className="hidden sm:inline">Share</span>
+          </button>
+
+          {/* Primary 1-Tap Add to WhatsApp Button */}
+          <button
+            type="button"
+            onClick={() => setIsWhatsAppHandoffOpen(true)}
+            className="inline-flex items-center gap-2 rounded-2xl bg-[#25D366] px-5 py-2.5 text-xs font-black text-black shadow-lg shadow-emerald-500/25 hover:bg-[#20bd5a] active:scale-95 transition-all cursor-pointer font-['Space_Grotesk']"
+            title="1-Tap Add Pack to WhatsApp"
+          >
+            <Smartphone className="h-4 w-4 stroke-[2.5]" />
+            <span>Add to WhatsApp</span>
           </button>
 
           <button
@@ -517,6 +548,21 @@ export function PackDetailStudio({
         imageUrl={pack.trayIconUrl || pack.stickers?.[0]?.imageUrl}
         stickersCount={occupiedCount}
         onShowNotice={showToast}
+      />
+
+      {/* WhatsApp Official Manifest & Diagnostics Modal */}
+      <WhatsAppManifestModal
+        isOpen={isManifestModalOpen}
+        onClose={() => setIsManifestModalOpen(false)}
+        pack={pack}
+      />
+
+      {/* WhatsApp 1-Tap & Multi-Channel Handoff Modal */}
+      <WhatsAppHandoffModal
+        isOpen={isWhatsAppHandoffOpen}
+        onClose={() => setIsWhatsAppHandoffOpen(false)}
+        pack={pack}
+        onNavigateToSlot={(slotIndex) => onOpenEditorForSlot(pack, slotIndex)}
       />
     </div>
   );

@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { StickerPackRecord, StickerRecord } from "../../src/types/pack";
 import { StickerDraft } from "../../utils/draftsDb";
+import { handleStickerImageError } from "../../utils/imageHelper";
 
 interface SlotNavigatorProps {
   pack: StickerPackRecord;
@@ -173,6 +174,14 @@ export function SlotNavigator({
                           src={sticker?.imageUrl || slotDrafts[idx]?.thumbnail || slotDrafts[idx]?.activeImageUrl!}
                           alt={`Slot ${idx + 1}`}
                           className="h-full w-full object-contain p-1"
+                          crossOrigin="anonymous"
+                          referrerPolicy="no-referrer"
+                          onError={(e) =>
+                            handleStickerImageError(
+                              e,
+                              sticker?.imageUrl || slotDrafts[idx]?.thumbnail || slotDrafts[idx]?.activeImageUrl
+                            )
+                          }
                         />
                       ) : (
                         <span>{idx + 1}</span>

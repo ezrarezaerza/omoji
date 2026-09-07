@@ -14,6 +14,7 @@ import {
 import { StickerRecord } from "../../src/types/pack";
 import { StickerDraft } from "../../utils/draftsDb";
 import { ConfirmModal } from "../UI/ConfirmModal";
+import { handleStickerImageError } from "../../utils/imageHelper";
 
 export type SlotStatus = "EMPTY" | "DRAFT" | "OCCUPIED";
 
@@ -174,6 +175,9 @@ export function SlotCard({
               alt={`Slot #${slotNumber}`}
               className="h-full w-full object-contain filter drop-shadow-md transition-transform duration-300 group-hover:scale-105"
               loading="lazy"
+              crossOrigin="anonymous"
+              referrerPolicy="no-referrer"
+              onError={(e) => handleStickerImageError(e, sticker.imageUrl)}
             />
           </div>
         ) : status === "DRAFT" && draft ? (
@@ -183,6 +187,9 @@ export function SlotCard({
                 src={draft.thumbnail || draft.activeImageUrl!}
                 alt={`Draft Slot #${slotNumber}`}
                 className="h-full w-full object-contain opacity-95 filter drop-shadow-sm transition-transform duration-300 group-hover:scale-105"
+                crossOrigin="anonymous"
+                referrerPolicy="no-referrer"
+                onError={(e) => handleStickerImageError(e, draft.thumbnail || draft.activeImageUrl)}
               />
             ) : (
               <div className="flex flex-col items-center justify-center gap-1 text-amber-600 dark:text-amber-400">

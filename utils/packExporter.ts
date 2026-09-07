@@ -148,6 +148,34 @@ export async function exportWaStickersBundle(
 
   zip.file("metadata.json", JSON.stringify(metadata, null, 2));
 
+  // Official WhatsApp contents.json schema
+  const sanitizedIdentifier = (packName || "whatsapp_pack")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .slice(0, 128);
+
+  const officialContents = {
+    android_play_store_link: "",
+    ios_app_store_link: "",
+    sticker_packs: [
+      {
+        identifier: sanitizedIdentifier,
+        name: packName.slice(0, 128),
+        publisher: authorName.slice(0, 128),
+        tray_image_file: "tray_icon.png",
+        image_data_version: "1",
+        avoid_cache: false,
+        animated_sticker_pack: animated,
+        stickers: metadataStickerList.map((s) => ({
+          image_file: s["image-file"],
+          emojis: s.emojis,
+        })),
+      },
+    ],
+  };
+
+  zip.file("contents.json", JSON.stringify(officialContents, null, 2));
+
   onProgress?.("Compacting .wastickers archive...", 95);
   const zipBlob = await zip.generateAsync({
     type: "blob",

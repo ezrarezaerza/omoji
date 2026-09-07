@@ -18,6 +18,7 @@ import {
 import { motion } from "framer-motion";
 import { StickerPackRecord } from "../../src/types/pack";
 import { ConfirmModal } from "../UI/ConfirmModal";
+import { handleStickerImageError } from "../../utils/imageHelper";
 
 interface PackCardProps {
   pack: StickerPackRecord;
@@ -84,6 +85,9 @@ export function PackCard({
                 src={pack.trayIconUrl || "https://api.dicebear.com/7.x/bottts/svg?seed=Pack"}
                 alt={pack.title}
                 className="h-full w-full object-contain rounded-xl"
+                crossOrigin="anonymous"
+                referrerPolicy="no-referrer"
+                onError={(e) => handleStickerImageError(e, pack.trayIconUrl)}
               />
             </div>
             <div>
@@ -127,6 +131,9 @@ export function PackCard({
                     src={sticker.imageUrl}
                     alt={`Sticker ${slotIdx + 1}`}
                     className="h-full w-full object-contain"
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => handleStickerImageError(e, sticker.imageUrl)}
                   />
                 ) : (
                   <span className="text-[10px] font-bold text-slate-300 dark:text-slate-600">

@@ -10,6 +10,7 @@ import {
   PUT as putPackById,
   DELETE as deletePackById,
 } from "../../app/api/packs/[packId]/route";
+import { GET as getWhatsAppManifest } from "../../app/api/packs/[packId]/whatsapp-manifest/route";
 import {
   POST as postSlotSticker,
   DELETE as deleteSlotSticker,
@@ -87,10 +88,9 @@ app.use(express.raw({ type: ["application/octet-stream", "multipart/form-data"],
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Cross-Origin headers for WebWorkers and WebAssembly
+// Cross-Origin headers
 app.use((_req, res, next) => {
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-  res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
   next();
 });
 
@@ -137,7 +137,12 @@ apiRouter.delete("/packs/:packId/stickers/:slotIndex", (req, res) => {
   );
 });
 
-// 2. Single Pack by ID API
+// 2. WhatsApp Official Sticker Provider Manifest & Diagnostics API
+apiRouter.get("/packs/:packId/whatsapp-manifest", (req, res) => {
+  return adaptWebHandler((r) => getWhatsAppManifest(r, { params: { packId: req.params.packId } }), req, res);
+});
+
+// 3. Single Pack by ID API
 apiRouter.get("/packs/:packId", (req, res) => {
   return adaptWebHandler((r) => getPackById(r, { params: { packId: req.params.packId } }), req, res);
 });

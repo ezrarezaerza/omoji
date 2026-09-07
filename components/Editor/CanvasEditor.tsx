@@ -165,6 +165,37 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         });
       };
 
+      img.onerror = () => {
+        if (!isCurrent) return;
+        if (
+          imageUrl &&
+          !imageUrl.startsWith("data:") &&
+          !imageUrl.startsWith("blob:") &&
+          !imageUrl.includes("/api/proxy-image")
+        ) {
+          const fallbackImg = new Image();
+          fallbackImg.crossOrigin = "anonymous";
+          fallbackImg.src = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
+          fallbackImg.onload = () => {
+            if (!isCurrent) return;
+            setImageObj(fallbackImg);
+            const maxContentSize = STAGE_SIZE - 48;
+            const scale = Math.min(
+              maxContentSize / fallbackImg.width,
+              maxContentSize / fallbackImg.height,
+              1.5
+            );
+            setImageTransform({
+              x: STAGE_SIZE / 2,
+              y: STAGE_SIZE / 2,
+              scaleX: scale,
+              scaleY: scale,
+              rotation: 0,
+            });
+          };
+        }
+      };
+
       return () => {
         isCurrent = false;
       };
