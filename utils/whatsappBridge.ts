@@ -137,33 +137,21 @@ export async function installPackToWhatsApp(
 
   // 2. If running on Mobile Web (Android):
   if (env.isAndroid) {
-    onProgress?.("Connecting to WhatsApp via Android Intent...", 60);
+    onProgress?.("Checking Android WhatsApp capabilities...", 60);
 
-    const authority = "com.omoji.stickers.provider";
-    const encodedPackName = encodeURIComponent(packName);
-    const intentUri = `intent://#Intent;action=com.whatsapp.intent.action.ENABLE_STICKER_PACK;package=com.whatsapp;S.extra_sticker_pack_id=omoji_${safePackId};S.extra_sticker_pack_authority=${authority};S.extra_sticker_pack_name=${encodedPackName};end`;
-
-    // Attempt companion scheme first (omoji://add-pack?id=...)
-    const companionDeepLink = `omoji://add-pack?id=${encodeURIComponent(pack.id)}`;
-
-    try {
-      // Trigger intent
-      window.location.href = intentUri;
-      onProgress?.("Handoff sent to device!", 100);
-
-      return {
-        success: true,
-        method: "android_intent",
-        message: "Opening WhatsApp confirmation prompt...",
-        details: { intentUri, companionDeepLink },
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        method: "android_intent",
-        message: err?.message || "Could not trigger WhatsApp intent.",
-      };
-    }
+    // Note: Android Chrome cannot directly register a ContentProvider into WhatsApp's private database
+    // without an installed companion APK. Calling the raw intent without the companion app causes Chrome
+    // to open Google Play Store looking for com.omoji.stickers.provider.
+    return {
+      success: false,
+      method: "fallback_guide",
+      message:
+        "To use your stickers right now without installing anything, use 'Send to WhatsApp Chat & Star ⭐' or download the WhatsApp sticker pack!",
+      details: {
+        suggestedAction: "share_or_archive",
+        intentUri: `intent://#Intent;action=com.whatsapp.intent.action.ENABLE_STICKER_PACK;package=com.whatsapp;S.extra_sticker_pack_id=omoji_${safePackId};S.extra_sticker_pack_authority=com.omoji.stickers.provider;S.extra_sticker_pack_name=${encodeURIComponent(packName)};end`,
+      },
+    };
   }
 
   // 3. If running on Mobile Web (iOS):
@@ -194,6 +182,6 @@ export async function installPackToWhatsApp(
   return {
     success: false,
     method: "fallback_guide",
-    message: "Direct 1-tap installation requires a mobile device with WhatsApp installed. Use Mobile Transfer (QR Code) or export the .wastickers archive.",
+    message: "Direct 1-tap installation requires a mobile device with WhatsApp installed. Use Mobile Transfer (QR Code) or download the WhatsApp sticker pack.",
   };
 }

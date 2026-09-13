@@ -133,8 +133,8 @@ export function PackExportStudioModal({
 
       showToast(`✨ Downloaded "${res.filename}" (${formatBytes(res.sizeBytes)})!`);
     } catch (err: any) {
-      console.error("Export .wastickers error:", err);
-      showToast(err.message || "Failed to generate .wastickers file.", true);
+      console.error("Export error:", err);
+      showToast(err.message || "Failed to generate WhatsApp pack file.", true);
     } finally {
       setIsExporting(false);
       setExportStep("");
@@ -255,7 +255,7 @@ export function PackExportStudioModal({
     try {
       const success = await copyStickerToClipboard(sticker.imageUrl);
       if (success) {
-        showToast("✨ Copied sticker PNG to clipboard! You can paste it directly into WhatsApp Web or Telegram.");
+        showToast("✨ Copied sticker image to clipboard! You can paste it directly into WhatsApp Web or any chat.");
       } else {
         showToast("Clipboard copy not supported by your browser; use Download instead.", true);
       }
@@ -297,7 +297,7 @@ export function PackExportStudioModal({
             }`}
           >
             <Smartphone className="h-4 w-4" />
-            <span>.WASTICKERS (Official)</span>
+            <span>WhatsApp Pack</span>
           </button>
 
           <button
@@ -349,7 +349,7 @@ export function PackExportStudioModal({
             }`}
           >
             <FileCode className="h-4 w-4" />
-            <span>JSON Backup</span>
+            <span>Pack Backup</span>
           </button>
         </div>
 
@@ -414,13 +414,13 @@ export function PackExportStudioModal({
                       <div className="space-y-2 max-w-lg">
                         <div className="inline-flex items-center gap-1.5 rounded-full bg-[#25D366]/20 px-3 py-1 text-[11px] font-black text-[#25D366] border border-[#25D366]/30">
                           <Sparkles className="h-3.5 w-3.5" />
-                          <span>Standard WhatsApp Format</span>
+                          <span>WhatsApp Ready</span>
                         </div>
                         <h3 className="text-xl font-black text-slate-900 dark:text-white font-['Space_Grotesk']">
-                          Download WhatsApp `.wastickers`
+                          Download WhatsApp Sticker Pack
                         </h3>
                         <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                          Generates a single-file archive compatible with WhatsApp on Android (Sticker Maker / Personal Stickers) and iOS apps, containing 512x512 WebP cutouts, 96x96 tray icon, and metadata manifest.
+                          Exports your complete sticker set with high-resolution cutouts, pack cover, and title ready for WhatsApp.
                         </p>
                       </div>
 
@@ -442,7 +442,7 @@ export function PackExportStudioModal({
                           className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-white/80 dark:bg-zinc-900/80 px-5 py-3.5 text-xs font-black text-emerald-800 dark:text-emerald-300 shadow-sm hover:bg-emerald-500/10 active:scale-95 transition-all disabled:opacity-40 cursor-pointer w-full sm:w-auto"
                         >
                           <Download className="h-4 w-4 stroke-[2.5]" />
-                          <span>Download .wastickers</span>
+                          <span>Download Pack File</span>
                         </button>
                       </div>
                     </div>
@@ -486,12 +486,12 @@ export function PackExportStudioModal({
                   {/* How to Install Guide Accordion */}
                   <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/40 dark:bg-white/5 p-5 space-y-3">
                     <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      How to import .wastickers into WhatsApp:
+                      How to add your pack to WhatsApp:
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-600 dark:text-slate-400">
                       <div className="flex flex-col gap-1 p-3 rounded-xl bg-white dark:bg-white/5 border border-slate-200 dark:border-white/5">
-                        <span className="font-black text-slate-900 dark:text-white">1. Download File</span>
-                        <p className="text-[11px]">Click Export above to save the <code>.wastickers</code> package on your device.</p>
+                        <span className="font-black text-slate-900 dark:text-white">1. Download Pack</span>
+                        <p className="text-[11px]">Click Download above to save your sticker pack on your device.</p>
                       </div>
                       <div className="flex flex-col gap-1 p-3 rounded-xl bg-white dark:bg-white/5 border border-slate-200 dark:border-white/5">
                         <span className="font-black text-slate-900 dark:text-white">2. Open in Sticker App</span>
@@ -722,7 +722,7 @@ export function PackExportStudioModal({
                       Standard ZIP Archive
                     </h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Download raw high-resolution sticker assets for archiving, Photoshop editing, or Telegram import.
+                      Download raw high-resolution sticker assets for archiving or creative editing.
                     </p>
                   </div>
                 </div>
@@ -770,10 +770,10 @@ export function PackExportStudioModal({
                   </div>
                   <div>
                     <h4 className="text-base font-black text-slate-900 dark:text-white">
-                      JSON Pack Manifest Backup
+                      Sticker Pack Backup File
                     </h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Export a portable single JSON file containing all 30 slot configurations, reaction emoji associations, and image assets.
+                      Export a portable backup file containing all your stickers, titles, and emoji associations to restore anytime.
                     </p>
                   </div>
                 </div>
@@ -784,7 +784,7 @@ export function PackExportStudioModal({
                   className="inline-flex items-center gap-2 rounded-xl bg-slate-900 dark:bg-white px-5 py-3 text-xs font-black text-white dark:text-slate-900 hover:opacity-90 active:scale-95 transition-all cursor-pointer"
                 >
                   <Download className="h-4 w-4" />
-                  <span>Download .json Pack Backup</span>
+                  <span>Download Pack Backup</span>
                 </button>
               </div>
             </div>
@@ -794,7 +794,7 @@ export function PackExportStudioModal({
         {/* Modal Footer */}
         <div className="flex items-center justify-between border-t border-slate-100 dark:border-white/10 pt-4">
           <span className="text-xs text-slate-500">
-            {occupiedCount} of 30 slots filled • WhatsApp requires min. 3
+            {occupiedCount} of 30 stickers • WhatsApp requires min. 3
           </span>
 
           <div className="flex items-center gap-2">

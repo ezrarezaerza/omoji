@@ -189,7 +189,7 @@ export function ExportModal({
       );
     } catch (err: any) {
       console.error("Export error:", err);
-      setError(err?.message || "Failed to generate .wastickers package.");
+      setError(err?.message || "Failed to generate sticker pack.");
     } finally {
       setIsExporting(false);
       setExportStep("");
@@ -416,7 +416,7 @@ export function ExportModal({
             }`}
           >
             <Smartphone className="h-4 w-4 text-[#25D366]" />
-            <span>.wastickers (WhatsApp)</span>
+            <span>WhatsApp Pack</span>
           </button>
 
           <button
@@ -602,9 +602,9 @@ export function ExportModal({
                       <Smartphone className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">Direct WhatsApp Package (.wastickers)</h3>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">Direct WhatsApp Sticker Pack</h3>
                       <p className="text-xs text-slate-600 dark:text-white/60">
-                        Official bridge format for WhatsApp, Sticker Maker, and Android/iOS sticker importers.
+                        Standard format ready to import directly into WhatsApp on Android and iPhone.
                       </p>
                     </div>
                   </div>
@@ -638,12 +638,12 @@ export function ExportModal({
                     {isExporting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin text-white" />
-                        <span>Exporting .wastickers...</span>
+                        <span>Exporting WhatsApp Pack...</span>
                       </>
                     ) : (
                       <>
                         <Download className="h-4 w-4" />
-                        <span>Download .wastickers Pack ({count} Stickers)</span>
+                        <span>Download WhatsApp Pack ({count} Stickers)</span>
                       </>
                     )}
                   </button>
@@ -776,7 +776,7 @@ export function ExportModal({
                     ) : (
                       <>
                         <Film className="h-4 w-4" />
-                        <span>Download Animated .wastickers Pack ({count} Stickers)</span>
+                        <span>Download Animated WhatsApp Pack ({count} Stickers)</span>
                       </>
                     )}
                   </button>
@@ -928,16 +928,6 @@ export function ExportModal({
                             >
                               <Copy className="h-2.5 w-2.5" />
                               Copy
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDownloadSingle(idx, "webp");
-                              }}
-                              className="rounded-lg bg-slate-200 dark:bg-white/10 px-2 py-0.5 text-[10px] font-bold text-slate-800 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20 transition cursor-pointer"
-                            >
-                              WebP
                             </button>
                           </div>
                         </div>

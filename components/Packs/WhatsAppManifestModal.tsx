@@ -96,7 +96,7 @@ export function WhatsAppManifestModal({
     <ResponsiveDialog
       isOpen={isOpen}
       onClose={onClose}
-      title="WhatsApp Sticker Manifest & Spec"
+      title="WhatsApp Pack Details & Info"
       maxWidthClass="max-w-3xl"
     >
       <div className="space-y-4 p-1">
@@ -109,7 +109,7 @@ export function WhatsAppManifestModal({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-black text-slate-900 dark:text-white font-['Space_Grotesk']">
-                  WhatsApp/stickers Standard Spec
+                  WhatsApp Sticker Pack Info
                 </h3>
                 {data?.diagnostics && (
                   <span

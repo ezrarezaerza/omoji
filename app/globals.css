@@ -48,30 +48,59 @@ html.light body {
   color: #0f172a;
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbar matching Omoji "Bold Grainy Bento" & WhatsApp Theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1f2c34 #0b141a;
+}
+
+html.light *,
+body.light * {
+  scrollbar-color: #cbd5e1 #f0f2f5;
+}
+
+/* Global WebKit Scrollbar (Chrome, Safari, Edge, Android WebView) */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-body.dark ::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: #0b141a;
 }
-body.dark ::-webkit-scrollbar-thumb {
+
+::-webkit-scrollbar-thumb {
   background: #1f2c34;
-  border-radius: 4px;
-}
-body.dark ::-webkit-scrollbar-thumb:hover {
-  background: #2a3942;
+  border-radius: 9999px;
+  border: 2px solid #0b141a;
+  background-clip: padding-box;
+  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+::-webkit-scrollbar-thumb:hover {
+  background: #25D366;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Light Mode WebKit Scrollbar */
+html.light ::-webkit-scrollbar-track,
 body.light ::-webkit-scrollbar-track {
   background: #f0f2f5;
 }
+
+html.light ::-webkit-scrollbar-thumb,
 body.light ::-webkit-scrollbar-thumb {
-  background: #d1d7db;
-  border-radius: 4px;
+  background: #cbd5e1;
+  border-radius: 9999px;
+  border: 2px solid #f0f2f5;
+  background-clip: padding-box;
 }
+
+html.light ::-webkit-scrollbar-thumb:hover,
 body.light ::-webkit-scrollbar-thumb:hover {
-  background: #8696a0;
+  background: #128C7E;
 }
+

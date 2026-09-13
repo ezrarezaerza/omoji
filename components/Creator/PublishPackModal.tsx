@@ -178,7 +178,7 @@ export function PublishPackModal({
       subtitle={
         publishedPackResult
           ? "Your stickers are now live and discoverable in the Explore Community"
-          : "Share your 30-slot sticker set with creators and group chats worldwide"
+          : "Share your sticker set with creators and group chats worldwide"
       }
       maxWidthClass="max-w-xl"
     >

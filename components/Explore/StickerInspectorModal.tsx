@@ -233,6 +233,11 @@ export function StickerInspectorModal({
               onOpenStudioPack(studioPack, slotIdx);
               onClose();
             }}
+            onRemixInStudio={(studioPack, slotIdx, url, title) => {
+              onOpenStudioPack(studioPack, slotIdx);
+              onRemixInStudio(url, title);
+              onClose();
+            }}
             onClose={onClose}
           />
         )}
@@ -307,7 +312,7 @@ export function StickerInspectorModal({
             ) : (
               <Download className="h-3.5 w-3.5 stroke-[2.5]" />
             )}
-            <span>Get Full Pack (.wastickers)</span>
+            <span>Get Full Pack (WhatsApp)</span>
           </button>
         </div>
       </div>

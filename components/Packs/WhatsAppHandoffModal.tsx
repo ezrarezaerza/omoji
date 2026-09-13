@@ -15,6 +15,8 @@ import {
   Send,
   HelpCircle,
   FolderArchive,
+  Star,
+  Info,
   Layers,
   Share2,
   Terminal,
@@ -24,11 +26,14 @@ import { StickerPackRecord } from "../../src/types/pack";
 import { ResponsiveDialog } from "../UI/ResponsiveDialog";
 import {
   getDeviceEnvironment,
-  checkWhatsAppAvailability,
-  installPackToWhatsApp,
   DeviceEnvironment,
 } from "../../utils/whatsappBridge";
 import { exportWaStickersBundle } from "../../utils/packExporter";
+import {
+  shareStickerToWhatsApp,
+  copyStickerToClipboard,
+  canWebShareFiles,
+} from "../../utils/whatsappTransfer";
 import { triggerHaptic } from "../../utils/haptics";
 import QRCode from "qrcode";
 
@@ -45,16 +50,11 @@ export function WhatsAppHandoffModal({
   pack,
   onNavigateToSlot,
 }: WhatsAppHandoffModalProps) {
-  const [activeTab, setActiveTab] = useState<"1tap" | "qr" | "archive" | "companion">("1tap");
+  const [activeTab, setActiveTab] = useState<"direct_chat" | "archive" | "qr" | "native">("direct_chat");
   const [deviceEnv, setDeviceEnv] = useState<DeviceEnvironment>(getDeviceEnvironment());
-  const [isInstalling, setIsInstalling] = useState(false);
-  const [installStep, setInstallStep] = useState<string>("");
-  const [installProgress, setInstallProgress] = useState<number>(0);
-  const [installResult, setInstallResult] = useState<{
-    success: boolean;
-    message: string;
-    details?: any;
-  } | null>(null);
+  const [selectedStickerIndex, setSelectedStickerIndex] = useState<number>(0);
+  const [isSharingSticker, setIsSharingSticker] = useState(false);
+  const [shareNotice, setShareNotice] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
   // QR Code State
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
@@ -76,18 +76,17 @@ export function WhatsAppHandoffModal({
     if (isOpen) {
       const env = getDeviceEnvironment();
       setDeviceEnv(env);
-      setInstallResult(null);
-      setIsInstalling(false);
-      setInstallProgress(0);
+      setShareNotice(null);
+      setIsSharingSticker(false);
 
-      // Select default tab: if mobile or native -> 1tap; if desktop -> qr
+      // Select default tab: if desktop -> qr; if mobile -> direct_chat
       if (env.isDesktop) {
         setActiveTab("qr");
       } else {
-        setActiveTab("1tap");
+        setActiveTab("direct_chat");
       }
 
-      // Generate dynamic QR code targeting this pack's 1-tap mobile launcher
+      // Generate dynamic QR code targeting this pack
       if (mobileDeepLink) {
         QRCode.toDataURL(mobileDeepLink, {
           width: 320,
@@ -104,36 +103,56 @@ export function WhatsAppHandoffModal({
     }
   }, [isOpen, pack.id, mobileDeepLink]);
 
-  // Execute 1-Tap Installation
-  const handleExecuteInstall = async () => {
+  // Share a specific sticker directly to WhatsApp
+  const handleShareSticker = async (index: number) => {
+    const sticker = stickers[index];
+    if (!sticker?.imageUrl) return;
+
     triggerHaptic("medium");
-    setIsInstalling(true);
-    setInstallResult(null);
-    setInstallProgress(10);
-    setInstallStep("Checking pack compliance & assets...");
+    setIsSharingSticker(true);
+    setShareNotice(null);
 
     try {
-      const result = await installPackToWhatsApp(pack, {
-        onProgress: (step, percent) => {
-          setInstallStep(step);
-          setInstallProgress(percent);
-        },
+      const res = await shareStickerToWhatsApp(sticker.imageUrl, {
+        title: `${pack.title} - Sticker #${index + 1}`,
+        text: `WhatsApp Sticker from "${pack.title}" by ${pack.publisher || "Omoji"}`,
+        fileName: `${pack.title.replace(/[^a-z0-9_-]/gi, "_")}_sticker_${index + 1}`,
+        format: "webp",
       });
 
-      setInstallResult(result);
-      if (result.success) {
+      if (res.success) {
         triggerHaptic("success");
+        if (res.method === "native-share") {
+          setShareNotice({
+            type: "success",
+            text: "✅ WhatsApp sharing sheet opened! Send to any chat or 'Message yourself', then tap the sticker and select ⭐ 'Add to Favorites'.",
+          });
+        } else if (res.method === "clipboard") {
+          setShareNotice({
+            type: "success",
+            text: "📋 Sticker copied to clipboard! Paste (Ctrl+V) directly into WhatsApp Web or desktop chat.",
+          });
+        } else {
+          setShareNotice({
+            type: "info",
+            text: "📥 Sticker downloaded! Drag & drop it directly into your WhatsApp chat.",
+          });
+        }
       } else {
         triggerHaptic("error");
+        setShareNotice({
+          type: "error",
+          text: res.message || "Sharing was cancelled or unsupported on this device.",
+        });
       }
     } catch (err: any) {
       triggerHaptic("error");
-      setInstallResult({
-        success: false,
-        message: err?.message || "An unexpected error occurred during installation.",
+      setShareNotice({
+        type: "error",
+        text: err?.message || "Failed to share sticker to WhatsApp.",
       });
     } finally {
-      setIsInstalling(false);
+      setIsSharingSticker(false);
     }
   };
 
@@ -163,9 +182,17 @@ export function WhatsAppHandoffModal({
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
       triggerHaptic("success");
+
+      setShareNotice({
+        type: "success",
+        text: `📦 Downloaded ${res.filename}! Tap the file in your notification bar and open with 'WhatsApp' or 'Sticker Maker' to import all stickers at once.`,
+      });
     } catch (err: any) {
       triggerHaptic("error");
-      alert(err.message || "Failed to download .wastickers archive.");
+      setShareNotice({
+        type: "error",
+        text: err.message || "Failed to export sticker pack.",
+      });
     } finally {
       setIsExportingArchive(false);
     }
@@ -189,6 +216,8 @@ export function WhatsAppHandoffModal({
     window.open(webUrl, "_blank");
   };
 
+  const currentSticker = stickers[selectedStickerIndex] || stickers[0];
+
   return (
     <ResponsiveDialog
       isOpen={isOpen}
@@ -196,7 +225,7 @@ export function WhatsAppHandoffModal({
       title="Add to WhatsApp"
       maxWidthClass="max-w-2xl"
     >
-      <div className="space-y-5 p-1 font-sans">
+      <div className="space-y-4 p-1 font-sans">
         {/* Pack Quick Header Banner */}
         <div className="flex items-center gap-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-3.5">
           <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-emerald-500/30 bg-white dark:bg-zinc-900 p-1 shadow-xs">
@@ -242,31 +271,16 @@ export function WhatsAppHandoffModal({
           </div>
         </div>
 
-        {/* Validation Warning if < 3 stickers */}
-        {!isCountValid && (
-          <div className="flex items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300">
-            <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500 mt-0.5" />
-            <div className="flex-1 space-y-1">
-              <p className="font-black">WhatsApp Specification Requirement</p>
-              <p className="text-[11px] opacity-90 leading-relaxed">
-                WhatsApp requires sticker packs to have a minimum of <strong>3 stickers</strong> and a maximum of <strong>30 stickers</strong>. Currently this pack has {occupiedCount}.
-              </p>
-              {onNavigateToSlot && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onNavigateToSlot(occupiedCount);
-                  }}
-                  className="mt-1.5 inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-amber-700 active:scale-95 transition-all cursor-pointer"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span>Create Sticker #{occupiedCount + 1}</span>
-                </button>
-              )}
-            </div>
+        {/* Informative Explanation Banner: Why Google Play Opened */}
+        <div className="flex items-start gap-2.5 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-3 text-xs text-blue-900 dark:text-blue-200">
+          <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />
+          <div className="text-[11px] leading-relaxed">
+            <strong>Why did Google Play open previously?</strong> WhatsApp does not allow websites to inject stickers directly into its internal keyboard without an Android system app installed. 
+            <span className="block mt-0.5 opacity-90">
+              👉 Use <strong>Method 1 (Send to Chat & Favorite ⭐)</strong> or <strong>Method 2 (Open with Sticker Maker)</strong> below to use your stickers in WhatsApp right now without installing anything!
+            </span>
           </div>
-        )}
+        </div>
 
         {/* Tab Navigation */}
         <div className="flex items-center gap-1.5 border-b border-slate-100 dark:border-white/10 pb-2 overflow-x-auto">
@@ -274,16 +288,32 @@ export function WhatsAppHandoffModal({
             type="button"
             onClick={() => {
               triggerHaptic("selection");
-              setActiveTab("1tap");
+              setActiveTab("direct_chat");
             }}
             className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black transition-all cursor-pointer ${
-              activeTab === "1tap"
+              activeTab === "direct_chat"
                 ? "bg-[#25D366] text-black shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
             }`}
           >
-            <Smartphone className="h-4 w-4" />
-            <span>1-Tap Add</span>
+            <Send className="h-4 w-4" />
+            <span>1. Send to WhatsApp (Instant ⭐)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic("selection");
+              setActiveTab("archive");
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black transition-all cursor-pointer ${
+              activeTab === "archive"
+                ? "bg-[#25D366] text-black shadow-xs"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
+            }`}
+          >
+            <FolderArchive className="h-4 w-4" />
+            <span>2. Download Sticker Pack</span>
           </button>
 
           <button
@@ -306,135 +336,223 @@ export function WhatsAppHandoffModal({
             type="button"
             onClick={() => {
               triggerHaptic("selection");
-              setActiveTab("archive");
+              setActiveTab("native");
             }}
             className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black transition-all cursor-pointer ${
-              activeTab === "archive"
-                ? "bg-[#25D366] text-black shadow-xs"
-                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
-            }`}
-          >
-            <FolderArchive className="h-4 w-4" />
-            <span>.WASTICKERS</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic("selection");
-              setActiveTab("companion");
-            }}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black transition-all cursor-pointer ${
-              activeTab === "companion"
+              activeTab === "native"
                 ? "bg-[#25D366] text-black shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
             }`}
           >
             <Terminal className="h-4 w-4" />
-            <span>Native Bridge</span>
+            <span>Native App Info</span>
           </button>
         </div>
 
-        {/* Tab 1: 1-Tap Add to WhatsApp */}
-        {activeTab === "1tap" && (
+        {/* Tab 1: Direct Send to WhatsApp Chat & Add to Favorites */}
+        {activeTab === "direct_chat" && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/60 dark:bg-white/5 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                  Target Platform & Environment
+            {/* Step-by-Step Instructions Banner */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="flex items-start gap-2.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 p-3">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#25D366] text-[11px] font-black text-black">
+                  1
                 </span>
-                <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-[#25D366] border border-emerald-500/20">
-                  {deviceEnv.isNative
-                    ? "Capacitor Native Container"
-                    : deviceEnv.isAndroid
-                    ? "Android Web"
-                    : deviceEnv.isIOS
-                    ? "iOS Web"
-                    : "Desktop Browser"}
-                </span>
+                <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                  Tap <strong>"Send to WhatsApp"</strong> below. When your phone's share sheet appears, select <strong>WhatsApp</strong> and send to any chat (or <strong>"Message yourself"</strong>).
+                </p>
               </div>
 
-              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                {deviceEnv.isNative
-                  ? "Running inside Omoji Native App. Tapping below will directly invoke the ContentProvider bridge to add this pack to your WhatsApp sticker drawer."
-                  : deviceEnv.isAndroid
-                  ? "Tapping below dispatches Android's official ENABLE_STICKER_PACK intent directly into WhatsApp Messenger or WhatsApp Business."
-                  : deviceEnv.isIOS
-                  ? "Tapping below dispatches the WhatsApp iOS deep-link scheme to prompt adding the sticker pack."
-                  : "You are currently on a desktop browser. For the fastest experience, scan the QR code under the Mobile Scan tab with your phone camera, or export the .wastickers archive."}
-              </p>
+              <div className="flex items-start gap-2.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 p-3">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[11px] font-black text-black">
+                  2
+                </span>
+                <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                  In WhatsApp, <strong>tap on the sticker in the chat</strong> and tap <span className="font-bold text-amber-500">⭐ Add to Favorites</span>. It will now be saved in your WhatsApp sticker drawer permanently!
+                </p>
+              </div>
             </div>
 
-            {/* Primary Action Button */}
-            <button
-              type="button"
-              onClick={handleExecuteInstall}
-              disabled={!isCountValid || isInstalling}
-              className="w-full flex items-center justify-center gap-2.5 rounded-2xl bg-[#25D366] px-6 py-4 text-sm font-black text-black shadow-lg shadow-emerald-500/25 hover:bg-[#20bd5a] active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-['Space_Grotesk']"
-            >
-              {isInstalling ? (
-                <>
-                  <RefreshCw className="h-5 w-5 animate-spin" />
-                  <span>{installStep || "Adding to WhatsApp..."}</span>
-                </>
-              ) : (
-                <>
-                  <Smartphone className="h-5 w-5 stroke-[2.5]" />
-                  <span>Add to WhatsApp ({occupiedCount} Stickers)</span>
-                </>
-              )}
-            </button>
+            {/* Sticker Preview & Carousel Picker */}
+            {stickers.length > 0 ? (
+              <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-white/5 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-300">
+                    Select Sticker to Send ({selectedStickerIndex + 1} of {stickers.length})
+                  </span>
+                  <span className="text-[10px] text-slate-500">Tap sticker to select</span>
+                </div>
 
-            {/* In-Progress Bar */}
-            {isInstalling && (
-              <div className="space-y-1.5">
-                <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-white/10 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-teal-500 to-[#25D366] transition-all duration-300 rounded-full"
-                    style={{ width: `${installProgress}%` }}
-                  />
+                {/* Horizontal mini-tray of stickers */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-2 pt-1 scrollbar-thin">
+                  {stickers.map((s, idx) => (
+                    <button
+                      key={s.id || idx}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("selection");
+                        setSelectedStickerIndex(idx);
+                      }}
+                      className={`relative h-14 w-14 shrink-0 rounded-xl border-2 p-1 transition-all cursor-pointer ${
+                        selectedStickerIndex === idx
+                          ? "border-[#25D366] bg-emerald-500/10 scale-105 shadow-md shadow-emerald-500/20"
+                          : "border-slate-200 dark:border-white/10 bg-white dark:bg-zinc-800 hover:border-slate-300"
+                      }`}
+                    >
+                      <img
+                        src={s.imageUrl}
+                        alt={`Sticker ${idx + 1}`}
+                        className="h-full w-full object-contain"
+                        crossOrigin="anonymous"
+                      />
+                      <span className="absolute -bottom-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black text-[9px] font-bold text-white">
+                        {idx + 1}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-                <div className="flex justify-between text-[11px] font-mono text-slate-500">
-                  <span>{installStep}</span>
-                  <span>{installProgress}%</span>
-                </div>
+
+                {/* Large Preview & Action Button */}
+                {currentSticker && (
+                  <div className="flex flex-col sm:flex-row items-center gap-4 pt-2 border-t border-slate-200/60 dark:border-white/10">
+                    <div className="h-24 w-24 shrink-0 rounded-2xl border border-slate-200 dark:border-white/15 bg-white dark:bg-zinc-900 p-2 shadow-inner flex items-center justify-center">
+                      <img
+                        src={currentSticker.imageUrl}
+                        alt="Selected Sticker"
+                        className="h-full w-full object-contain"
+                        crossOrigin="anonymous"
+                      />
+                    </div>
+
+                    <div className="flex-1 w-full space-y-2 text-center sm:text-left">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                          Sticker #{selectedStickerIndex + 1}
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Format: 512x512 Transparent WebP (Official WhatsApp Standard)
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleShareSticker(selectedStickerIndex)}
+                        disabled={isSharingSticker}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-6 py-3 text-xs font-black text-black shadow-lg shadow-emerald-500/25 hover:bg-[#20bd5a] active:scale-95 transition-all cursor-pointer font-['Space_Grotesk'] disabled:opacity-50"
+                      >
+                        {isSharingSticker ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                            <span>Opening WhatsApp...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-4 w-4 stroke-[2.5]" />
+                            <span>Send Sticker #{selectedStickerIndex + 1} to WhatsApp</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-xs text-slate-500">
+                No stickers found in this pack yet. Create at least 1 sticker to share!
               </div>
             )}
 
-            {/* Result Feedback Banner */}
-            {installResult && (
+            {/* Notification feedback */}
+            {shareNotice && (
               <div
-                className={`rounded-2xl border p-4 text-xs space-y-2 ${
-                  installResult.success
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
-                    : "border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-300"
+                className={`rounded-xl border p-3 text-xs flex items-start gap-2 ${
+                  shareNotice.type === "success"
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200"
+                    : shareNotice.type === "error"
+                    ? "border-red-500/30 bg-red-500/10 text-red-900 dark:text-red-200"
+                    : "border-blue-500/30 bg-blue-500/10 text-blue-900 dark:text-blue-200"
                 }`}
               >
-                <div className="flex items-center gap-2 font-black">
-                  {installResult.success ? (
-                    <CheckCircle2 className="h-4 w-4 text-[#25D366]" />
-                  ) : (
-                    <AlertTriangle className="h-4 w-4 text-red-500" />
-                  )}
-                  <span>{installResult.success ? "Success!" : "Notice"}</span>
-                </div>
-                <p className="leading-relaxed opacity-90">{installResult.message}</p>
-                {!installResult.success && deviceEnv.isDesktop && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("qr")}
-                    className="mt-1 inline-flex items-center gap-1.5 font-bold text-emerald-600 dark:text-[#25D366] underline cursor-pointer"
-                  >
-                    <QrCode className="h-3.5 w-3.5" />
-                    <span>Switch to Mobile Scan QR code</span>
-                  </button>
+                {shareNotice.type === "success" ? (
+                  <CheckCircle2 className="h-4 w-4 text-[#25D366] shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                 )}
+                <span className="leading-relaxed">{shareNotice.text}</span>
               </div>
             )}
           </div>
         )}
 
-        {/* Tab 2: Mobile Scan (QR Code) */}
+        {/* Tab 2: Whole Pack (.wastickers - Universal Import) */}
+        {activeTab === "archive" && (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-white/5 p-5 space-y-4">
+              <div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                  Download Complete WhatsApp Pack
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                  Save all {occupiedCount} stickers at once to add directly to your WhatsApp stickers drawer.
+                </p>
+              </div>
+
+              {/* 3 Step Visual Guide */}
+              <div className="space-y-2 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 p-3 text-xs">
+                <span className="font-black text-slate-900 dark:text-white uppercase text-[10px] tracking-wider">
+                  How to Add Pack to WhatsApp:
+                </span>
+                <ol className="space-y-1.5 text-slate-600 dark:text-slate-300 text-[11px]">
+                  <li className="flex items-center gap-2">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#25D366] text-[10px] font-black text-black">
+                      1
+                    </span>
+                    <span>Tap <strong>&ldquo;Download Pack&rdquo;</strong> below.</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#25D366] text-[10px] font-black text-black">
+                      2
+                    </span>
+                    <span>Open the downloaded file on your mobile device.</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#25D366] text-[10px] font-black text-black">
+                      3
+                    </span>
+                    <span>Select <strong>WhatsApp</strong> and tap <strong>&ldquo;Add to WhatsApp&rdquo;</strong>!</span>
+                  </li>
+                </ol>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDownloadWastickers}
+                disabled={!isCountValid || isExportingArchive}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-3.5 text-xs font-black text-white shadow-md hover:brightness-105 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
+              >
+                {isExportingArchive ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Preparing {occupiedCount} Stickers...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 stroke-[2.5]" />
+                    <span>Download WhatsApp Pack ({occupiedCount} Stickers)</span>
+                  </>
+                )}
+              </button>
+
+              {!isCountValid && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  ⚠️ WhatsApp requires at least 3 stickers in a pack to bundle (currently {occupiedCount}).
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Mobile Scan (QR Code) */}
         {activeTab === "qr" && (
           <div className="space-y-5">
             <div className="flex flex-col sm:flex-row items-center gap-6 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-white/5 p-5">
@@ -459,7 +577,7 @@ export function WhatsAppHandoffModal({
                   Scan with your Phone Camera
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  Open your mobile camera or QR reader. Tapping the link opens Omoji directly on your phone with this pack ready for 1-tap addition to WhatsApp.
+                  Open your mobile camera or QR reader. Tapping the link opens Omoji directly on your phone with this pack ready to send to WhatsApp.
                 </p>
 
                 <div className="flex flex-wrap items-center gap-2 pt-1 justify-center sm:justify-start">
@@ -495,78 +613,16 @@ export function WhatsAppHandoffModal({
           </div>
         )}
 
-        {/* Tab 3: .WASTICKERS Archive Export */}
-        {activeTab === "archive" && (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-white/5 p-5 space-y-3">
-              <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                Universal WhatsApp Package (.wastickers)
-              </h4>
-              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                A single bundled file containing all 512x512 WebP cutouts, 96x96 tray icon, metadata, and WhatsApp-standard <code>contents.json</code>.
-              </p>
-
-              <button
-                type="button"
-                onClick={handleDownloadWastickers}
-                disabled={!isCountValid || isExportingArchive}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-3 text-xs font-black text-white shadow-md hover:brightness-105 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
-              >
-                {isExportingArchive ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                    <span>Bundling .wastickers...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="h-4 w-4 stroke-[2.5]" />
-                    <span>Download {pack.title}.wastickers</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/30 dark:bg-white/5 p-4 text-xs space-y-2">
-              <span className="font-black text-slate-900 dark:text-white uppercase tracking-wider text-[11px]">
-                Import Instructions:
-              </span>
-              <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
-                <li>Download the <code>.wastickers</code> file above.</li>
-                <li>Tap the downloaded file in your notification bar or file manager.</li>
-                <li>Choose <strong>WhatsApp</strong> or sticker importer app (e.g., Sticker Maker) to add to your sticker keyboard.</li>
-              </ol>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 4: Native Companion & Architecture */}
-        {activeTab === "companion" && (
+        {/* Tab 4: Native Companion App Info */}
+        {activeTab === "native" && (
           <div className="space-y-4 text-xs">
             <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-white/5 p-4 space-y-2.5">
               <div className="flex items-center gap-2 font-black text-slate-900 dark:text-white">
                 <Terminal className="h-4 w-4 text-[#25D366]" />
-                <span>Omoji Native Sticker Architecture</span>
+                <span>How WhatsApp's Native System Works</span>
               </div>
-              <p className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
-                Omoji includes a full native Capacitor wrapper configured with official Android ContentProvider and iOS Pasteboard bridges:
-              </p>
-
-              <div className="space-y-1.5 font-mono text-[11px] bg-black/80 text-emerald-400 p-3 rounded-xl border border-white/10 overflow-x-auto">
-                <div>Android Authority: com.omoji.stickers.provider</div>
-                <div>Action: com.whatsapp.intent.action.ENABLE_STICKER_PACK</div>
-                <div>iOS Pasteboard: net.whatsapp.WhatsApp.stickerpack</div>
-                <div>Universal Deep Link: omoji://add-pack?id={pack.id}</div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/30 dark:bg-white/5 p-4 space-y-2">
-              <span className="font-black text-slate-900 dark:text-white">Run Native Container on Device:</span>
-              <div className="space-y-1 font-mono text-[11px] text-slate-600 dark:text-zinc-300 bg-slate-200/50 dark:bg-white/5 p-2.5 rounded-lg">
-                <div>npx cap sync</div>
-                <div>npx cap open android</div>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Running in Android Studio or Xcode enables 100% direct native installation without relying on third-party companion tools.
+              <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">
+                To start using your stickers in WhatsApp immediately, use <strong>Method 1 (Send to Chat &amp; Favorite ⭐)</strong> or <strong>Method 2 (Download Sticker Pack)</strong> for a smooth, instant experience!
               </p>
             </div>
           </div>

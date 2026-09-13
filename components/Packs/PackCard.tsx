@@ -192,7 +192,7 @@ export function PackCard({
         {/* Action Bar */}
         <div className="flex items-center justify-between gap-2 pt-1">
           <span className="text-[11px] font-medium text-slate-400">
-            Click to open 30 slots
+            Click to open pack
           </span>
 
           <div className="flex items-center gap-1.5">
@@ -200,7 +200,7 @@ export function PackCard({
               <button
                 type="button"
                 onClick={handleExport}
-                title="Export .wastickers package"
+                title="Export WhatsApp pack"
                 className="inline-flex items-center gap-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/25 transition-all cursor-pointer"
               >
                 <Download className="h-3.5 w-3.5" />

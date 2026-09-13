@@ -71,7 +71,7 @@ export function CreatePackModal({
       isOpen={isOpen}
       onClose={onClose}
       title="New Sticker Pack"
-      description="Creates a dedicated 30-slot set for WhatsApp & Telegram"
+      description="Create a custom sticker pack ready to export directly to WhatsApp"
       icon={
         <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#25D366] via-[#128C7E] to-[#075E54] text-white shadow-md shadow-emerald-500/20">
           <Sticker className="h-5 w-5 stroke-[2.2]" />
@@ -144,7 +144,7 @@ export function CreatePackModal({
         <div className="flex items-start gap-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3 text-[11px] font-medium text-emerald-800 dark:text-emerald-300">
           <Info className="h-4 w-4 shrink-0 text-[#25D366] mt-0.5" />
           <span>
-            Your pack includes 30 interactive sticker slots. The first sticker in Slot #1 is automatically used as the pack icon in WhatsApp!
+            Your pack can hold up to 30 custom stickers. The first sticker you add will automatically be used as the pack cover icon in WhatsApp!
           </span>
         </div>
 
@@ -171,7 +171,7 @@ export function CreatePackModal({
             ) : (
               <>
                 <Sparkles className="h-4 w-4" />
-                <span>Create 30-Slot Pack</span>
+                <span>Create Sticker Pack</span>
               </>
             )}
           </button>

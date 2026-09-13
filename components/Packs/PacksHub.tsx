@@ -18,14 +18,13 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { PackCard } from "./PackCard";
 import { CreatePackModal } from "./CreatePackModal";
-import { QuickDropBanner } from "./QuickDropBanner";
 import { fetchPacks, deletePack } from "../../utils/packApi";
 import { StickerPackRecord } from "../../src/types/pack";
 
 interface PacksHubProps {
   onSelectPack: (pack: StickerPackRecord) => void;
   onExportPack?: (pack: StickerPackRecord) => void;
-  onOpenEditor?: (initialUrl?: string, file?: File, draft?: any) => void;
+  onOpenEditor?: (url?: string, file?: File, draft?: any) => void;
   defaultCreatorName?: string;
   isGuest?: boolean;
   onOpenAuth?: () => void;
@@ -68,7 +67,7 @@ export function PacksHub({
 
   const handlePackCreated = (newPack: StickerPackRecord) => {
     setPacks((prev) => [newPack, ...prev]);
-    showToast(`Pack "${newPack.title}" created! Opening 30-slot grid...`);
+    showToast(`Pack "${newPack.title}" created! Opening studio...`);
     onSelectPack(newPack);
   };
 
@@ -180,16 +179,12 @@ export function PacksHub({
               ＋ Create Pack
             </div>
             <p className="mt-1 text-[11px] font-medium text-emerald-100">
-              Opens a new 30-slot canvas grid
+              Opens a new sticker pack
             </p>
           </div>
         </button>
       </div>
 
-      {/* Quick Drop & Instant Cutout Bar */}
-      {onOpenEditor && (
-        <QuickDropBanner onOpenEditor={onOpenEditor} />
-      )}
 
       {/* Main Hub Section: Search & Filter Toolbar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
@@ -207,7 +202,7 @@ export function PacksHub({
           <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 mt-0.5">
             {isGuest
               ? "Your packs and sticker slots are isolated to this guest session."
-              : "Select any pack to view or edit its 30 individual sticker slots."}
+              : "Select any pack to view or edit stickers."}
           </p>
         </div>
 
@@ -273,7 +268,7 @@ export function PacksHub({
               Create New Pack
             </h4>
             <p className="mt-1 text-xs font-medium text-slate-400 max-w-[200px]">
-              Start another 30-slot set with custom pack and creator branding.
+              Start another pack with custom title and creator branding.
             </p>
           </button>
         </div>
@@ -317,7 +312,7 @@ export function PacksHub({
             Every sticker belongs to a pack! Define your pack name and creator name to unlock 30 open slots for AI cutouts, meme text, and die-cut outlines.
           </p>
 
-          <div className="mt-8 flex items-center justify-center">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
@@ -327,6 +322,15 @@ export function PacksHub({
               <span>Create Your First Sticker Pack</span>
               <ArrowRight className="h-4 w-4" />
             </button>
+            {onOpenEditor && (
+              <button
+                type="button"
+                onClick={() => onOpenEditor()}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#182229] px-5 py-3.5 text-xs sm:text-sm font-bold text-slate-800 dark:text-white shadow-xs hover:border-[#25D366] transition-all cursor-pointer font-['Space_Grotesk']"
+              >
+                <span>Freeform Canvas</span>
+              </button>
+            )}
           </div>
         </div>
       )}

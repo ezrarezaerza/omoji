@@ -11,14 +11,35 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon.svg" />
     <title>OMOJI Sticker Studio</title>
-    <meta name="description" content="Create fun custom WhatsApp stickers from your favorite photos and memes with effortless 1-click magic." />
+    <meta name="description" content="Create custom WhatsApp stickers from photos and memes with instant background removal, custom text, and 1-tap export to WhatsApp." />
     <meta property="og:title" content="OMOJI Sticker Studio" />
-    <meta property="og:description" content="Create fun custom WhatsApp stickers from your favorite photos and memes with effortless 1-click magic." />
+    <meta property="og:description" content="Create custom WhatsApp stickers from photos and memes with instant background removal, custom text, and 1-tap export to WhatsApp." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bangers&family=Fredoka:wght@600;700&family=Permanent+Marker&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      // Immediately purge stale/poisoned service worker caches on development hosts or legacy SW versions
+      (function() {
+        if (typeof window === 'undefined') return;
+        var isDevHost = location.hostname.includes('run.app') || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        if ('serviceWorker' in navigator && isDevHost) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            regs.forEach(function(r) { r.unregister(); });
+          });
+        }
+        if ('caches' in window) {
+          caches.keys().then(function(names) {
+            names.forEach(function(name) {
+              if (name.includes('v1') || isDevHost) {
+                caches.delete(name);
+              }
+            });
+          });
+        }
+      })();
+    </script>
   </head>
   <body class="antialiased selection:bg-orange-500 selection:text-white">
     <div id="root"></div>

@@ -10,7 +10,6 @@ import {
   Sparkles,
   ExternalLink,
   Twitter,
-  Send,
   Download,
   X,
 } from "lucide-react";
@@ -74,13 +73,6 @@ export function SharePackModal({
   const handleTwitterShare = () => {
     window.open(
       `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`,
-      "_blank"
-    );
-  };
-
-  const handleTelegramShare = () => {
-    window.open(
-      `https://t.me/share/url?url=${encodeURIComponent(fullShareUrl)}&text=${encodeURIComponent(shareText)}`,
       "_blank"
     );
   };
@@ -156,7 +148,7 @@ export function SharePackModal({
         </button>
 
         {/* Secondary Social Channels Grid */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={handleTwitterShare}
@@ -168,20 +160,11 @@ export function SharePackModal({
 
           <button
             type="button"
-            onClick={handleTelegramShare}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#182229] p-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 transition-all cursor-pointer"
-          >
-            <Send className="h-3.5 w-3.5 text-blue-500" />
-            <span>Telegram</span>
-          </button>
-
-          <button
-            type="button"
             onClick={handleNativeShare}
             className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#182229] p-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 transition-all cursor-pointer"
           >
             <Share2 className="h-3.5 w-3.5 text-purple-500" />
-            <span>More...</span>
+            <span>More Options</span>
           </button>
         </div>
 

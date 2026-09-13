@@ -113,7 +113,7 @@ export function PWAInstallBanner() {
             className="fixed top-0 inset-x-0 z-50 bg-amber-500 text-black px-4 py-2 text-xs font-extrabold flex items-center justify-center gap-2 shadow-xl backdrop-blur-md"
           >
             <WifiOff className="h-4 w-4" />
-            <span>Offline Mode Active • Your edits and sticker packs are autosaved locally in IndexedDB</span>
+            <span>Offline Mode Active • Reconnecting to online database when back online</span>
           </motion.div>
         )}
         {wasOffline && isOnline && (

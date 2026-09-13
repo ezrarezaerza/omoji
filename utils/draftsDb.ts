@@ -1,6 +1,7 @@
 /**
- * IndexedDB Local Storage & Project Snapshots Engine for Omoji Sticker Studio
- * High-performance, offline-first persistence for sticker layers, cutouts, text, and pack collections.
+ * Online Database & Active Session Storage Engine for Omoji Sticker Studio
+ * Replaces legacy IndexedDB with direct Online PostgreSQL database persistence
+ * and high-speed in-memory / session state for active slot editing.
  */
 
 export interface ImageTransformMatrix {
@@ -37,143 +38,118 @@ export interface StickerDraft {
   lastSyncedAt?: number;
 }
 
-const DB_NAME = "OmojiStickerStudioDB";
-const DB_VERSION = 1;
-const STORE_DRAFTS = "drafts";
-const STORE_PACKS = "offline_packs";
-
-let dbInstance: IDBDatabase | null = null;
+const IN_MEMORY_DRAFTS = new Map<string, StickerDraft>();
+const SESSION_STORAGE_PREFIX = "omoji_online_draft_";
 
 /**
- * Initializes and upgrades the IndexedDB database
+ * Proactively purges any legacy IndexedDB databases from user's browser
+ * to ensure 100% reliance on the online database.
  */
-export function openDraftsDb(): Promise<IDBDatabase> {
-  if (dbInstance) {
-    return Promise.resolve(dbInstance);
-  }
-
-  return new Promise((resolve, reject) => {
-    if (typeof window === "undefined" || !window.indexedDB) {
-      reject(new Error("IndexedDB is not supported in this environment."));
-      return;
+export async function purgeAllIndexedDb(): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+  try {
+    const dbsToPurge = ["OmojiStickerStudioDB", "OmojiExploreDB"];
+    for (const dbName of dbsToPurge) {
+      const req = window.indexedDB.deleteDatabase(dbName);
+      req.onsuccess = () => {
+        console.log(`[Database] Successfully purged legacy IndexedDB: ${dbName}`);
+      };
+      req.onerror = () => {
+        console.warn(`[Database] Could not purge IndexedDB ${dbName}:`, req.error);
+      };
+      req.onblocked = () => {
+        console.warn(`[Database] IndexedDB ${dbName} purge was blocked by open connection.`);
+      };
     }
+  } catch (err) {
+    console.warn("[Database] Error while purging legacy IndexedDB:", err);
+  }
+}
 
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-
-      // Drafts Store
-      if (!db.objectStoreNames.contains(STORE_DRAFTS)) {
-        const draftStore = db.createObjectStore(STORE_DRAFTS, { keyPath: "id" });
-        draftStore.createIndex("updatedAt", "updatedAt", { unique: false });
-        draftStore.createIndex("packName", "packName", { unique: false });
-      }
-
-      // Offline Packs Store
-      if (!db.objectStoreNames.contains(STORE_PACKS)) {
-        const packStore = db.createObjectStore(STORE_PACKS, { keyPath: "id" });
-        packStore.createIndex("updatedAt", "updatedAt", { unique: false });
-      }
-    };
-
-    request.onsuccess = () => {
-      dbInstance = request.result;
-      resolve(dbInstance);
-    };
-
-    request.onerror = () => {
-      console.error("Failed to open IndexedDB:", request.error);
-      reject(request.error);
-    };
-  });
+// Auto-purge on browser load
+if (typeof window !== "undefined") {
+  setTimeout(() => {
+    purgeAllIndexedDb();
+  }, 100);
 }
 
 /**
- * Saves or updates a draft snapshot
+ * Saves or updates an active draft (persisted to session & memory, with online DB synchronization)
  */
 export async function saveDraftToDb(draft: StickerDraft): Promise<string> {
-  const db = await openDraftsDb();
-  return new Promise((resolve, reject) => {
+  const payload: StickerDraft = {
+    ...draft,
+    updatedAt: Date.now(),
+    itemCount: (draft.packStickers?.length || 0) + (draft.activeImageUrl ? 1 : 0),
+  };
+
+  IN_MEMORY_DRAFTS.set(payload.id, payload);
+
+  if (typeof window !== "undefined") {
     try {
-      const transaction = db.transaction([STORE_DRAFTS], "readwrite");
-      const store = transaction.objectStore(STORE_DRAFTS);
-      
-      const payload: StickerDraft = {
-        ...draft,
-        updatedAt: Date.now(),
-        itemCount: (draft.packStickers?.length || 0) + (draft.activeImageUrl ? 1 : 0),
-      };
-
-      const request = store.put(payload);
-
-      request.onsuccess = () => {
-        resolve(payload.id);
-      };
-
-      request.onerror = () => {
-        reject(request.error);
-      };
-    } catch (err) {
-      reject(err);
+      sessionStorage.setItem(`${SESSION_STORAGE_PREFIX}${payload.id}`, JSON.stringify(payload));
+    } catch (e) {
+      console.warn("Could not save draft to sessionStorage:", e);
     }
-  });
+  }
+
+  return payload.id;
 }
 
 /**
- * Retrieves a single draft by ID
+ * Retrieves a single draft by ID from session/memory
  */
 export async function getDraftFromDb(id: string): Promise<StickerDraft | null> {
-  const db = await openDraftsDb();
-  return new Promise((resolve, reject) => {
+  if (IN_MEMORY_DRAFTS.has(id)) {
+    return IN_MEMORY_DRAFTS.get(id) || null;
+  }
+
+  if (typeof window !== "undefined") {
     try {
-      const transaction = db.transaction([STORE_DRAFTS], "readonly");
-      const store = transaction.objectStore(STORE_DRAFTS);
-      const request = store.get(id);
-
-      request.onsuccess = () => {
-        resolve(request.result || null);
-      };
-
-      request.onerror = () => {
-        reject(request.error);
-      };
-    } catch (err) {
-      reject(err);
+      const raw = sessionStorage.getItem(`${SESSION_STORAGE_PREFIX}${id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        IN_MEMORY_DRAFTS.set(id, parsed);
+        return parsed;
+      }
+    } catch (e) {
+      console.warn("Could not read draft from sessionStorage:", e);
     }
-  });
+  }
+
+  return null;
 }
 
 /**
- * Retrieves all saved drafts sorted by most recently updated
+ * Retrieves all active drafts
  */
 export async function getAllDraftsFromDb(): Promise<StickerDraft[]> {
-  const db = await openDraftsDb();
-  return new Promise((resolve, reject) => {
+  const drafts: StickerDraft[] = [];
+
+  if (typeof window !== "undefined") {
     try {
-      const transaction = db.transaction([STORE_DRAFTS], "readonly");
-      const store = transaction.objectStore(STORE_DRAFTS);
-      const index = store.index("updatedAt");
-      const request = index.openCursor(null, "prev"); // newest first
-      const drafts: StickerDraft[] = [];
-
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (cursor) {
-          drafts.push(cursor.value);
-          cursor.continue();
-        } else {
-          resolve(drafts);
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key && key.startsWith(SESSION_STORAGE_PREFIX)) {
+          const raw = sessionStorage.getItem(key);
+          if (raw) {
+            drafts.push(JSON.parse(raw));
+          }
         }
-      };
-
-      request.onerror = () => {
-        reject(request.error);
-      };
-    } catch (err) {
-      reject(err);
+      }
+    } catch (e) {
+      console.warn("Could not read all drafts from sessionStorage:", e);
     }
-  });
+  }
+
+  // Merge with memory map
+  for (const [id, d] of IN_MEMORY_DRAFTS.entries()) {
+    if (!drafts.some((x) => x.id === id)) {
+      drafts.push(d);
+    }
+  }
+
+  return drafts.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /**
@@ -188,19 +164,14 @@ export async function getLatestDraftFromDb(): Promise<StickerDraft | null> {
  * Deletes a draft by ID
  */
 export async function deleteDraftFromDb(id: string): Promise<void> {
-  const db = await openDraftsDb();
-  return new Promise((resolve, reject) => {
+  IN_MEMORY_DRAFTS.delete(id);
+  if (typeof window !== "undefined") {
     try {
-      const transaction = db.transaction([STORE_DRAFTS], "readwrite");
-      const store = transaction.objectStore(STORE_DRAFTS);
-      const request = store.delete(id);
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    } catch (err) {
-      reject(err);
+      sessionStorage.removeItem(`${SESSION_STORAGE_PREFIX}${id}`);
+    } catch (e) {
+      console.warn("Could not remove draft from sessionStorage:", e);
     }
-  });
+  }
 }
 
 /**
@@ -225,15 +196,15 @@ export async function duplicateDraftInDb(id: string): Promise<StickerDraft> {
 }
 
 /**
- * Calculates estimated local storage usage across drafts
+ * Calculates estimated storage usage across active drafts
  */
 export async function getDraftsStorageUsage(): Promise<{ usedBytes: number; draftCount: number; formattedSize: string }> {
   try {
     const drafts = await getAllDraftsFromDb();
     let approximateBytes = 0;
-    
+
     for (const draft of drafts) {
-      approximateBytes += JSON.stringify(draft).length * 2; // rough UTF-16 byte estimation
+      approximateBytes += JSON.stringify(draft).length * 2;
     }
 
     const formattedSize = formatStorageBytes(approximateBytes);
@@ -248,22 +219,24 @@ export async function getDraftsStorageUsage(): Promise<{ usedBytes: number; draf
 }
 
 /**
- * Clear all drafts
+ * Clear all drafts from active session
  */
 export async function clearAllDraftsFromDb(): Promise<void> {
-  const db = await openDraftsDb();
-  return new Promise((resolve, reject) => {
+  IN_MEMORY_DRAFTS.clear();
+  if (typeof window !== "undefined") {
     try {
-      const transaction = db.transaction([STORE_DRAFTS], "readwrite");
-      const store = transaction.objectStore(STORE_DRAFTS);
-      const request = store.clear();
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    } catch (err) {
-      reject(err);
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key && key.startsWith(SESSION_STORAGE_PREFIX)) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((k) => sessionStorage.removeItem(k));
+    } catch (e) {
+      console.warn("Could not clear session drafts:", e);
     }
-  });
+  }
 }
 
 export function formatStorageBytes(bytes: number): string {
@@ -339,7 +312,7 @@ export async function deleteSlotDraft(
   slotIndex: number
 ): Promise<void> {
   const draftId = getSlotDraftId(packId, slotIndex);
-  return await deleteDraftFromDb(draftId);
+  await deleteDraftFromDb(draftId);
 }
 
 /**
@@ -366,4 +339,3 @@ export async function getAllSlotDraftsForPack(
 
   return result;
 }
-

@@ -1,93 +1,19 @@
 /**
- * IndexedDB Persistence Layer for Explore Feed
- * Handles user bookmarks/favorites and locally published custom packs with localStorage fallback.
+ * Persistence Layer for Explore Feed
+ * Direct Local Storage persistence (IndexedDB completely deprecated & purged)
+ * Handles user bookmarks/favorites and published custom packs with instant responsiveness.
  */
 
-import { ExplorePack } from "../src/types/explore";
-
-const EXPLORE_DB_NAME = "OmojiExploreDB";
-const EXPLORE_DB_VERSION = 2;
-
-const STORE_FAVORITE_PACKS = "favorite_packs";
-const STORE_FAVORITE_STICKERS = "favorite_stickers";
-const STORE_CUSTOM_PACKS = "custom_published_packs";
-const STORE_CREATOR_FOLLOWS = "creator_follows";
+import { ExplorePack, ExploreSticker } from "../src/types/explore";
 
 const LS_KEY_FAV_PACKS = "omoji_explore_fav_packs";
 const LS_KEY_FAV_STICKERS = "omoji_explore_fav_stickers";
+const LS_KEY_FAV_STICKER_RECORDS = "omoji_explore_fav_sticker_records";
 const LS_KEY_CUSTOM_PACKS = "omoji_explore_custom_published_packs";
 const LS_KEY_CREATOR_FOLLOWS = "omoji_explore_creator_follows";
 
-let exploreDbInstance: IDBDatabase | null = null;
-
-/**
- * Opens or initializes the Explore IndexedDB instance
- */
-export function openExploreDb(): Promise<IDBDatabase> {
-  if (exploreDbInstance) {
-    return Promise.resolve(exploreDbInstance);
-  }
-
-  return new Promise((resolve, reject) => {
-    if (typeof window === "undefined" || !window.indexedDB) {
-      reject(new Error("IndexedDB not available in this environment."));
-      return;
-    }
-
-    const request = indexedDB.open(EXPLORE_DB_NAME, EXPLORE_DB_VERSION);
-
-    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-
-      // Favorite Packs Store
-      if (!db.objectStoreNames.contains(STORE_FAVORITE_PACKS)) {
-        const favPackStore = db.createObjectStore(STORE_FAVORITE_PACKS, {
-          keyPath: "id",
-        });
-        favPackStore.createIndex("savedAt", "savedAt", { unique: false });
-      }
-
-      // Favorite Stickers Store
-      if (!db.objectStoreNames.contains(STORE_FAVORITE_STICKERS)) {
-        const favStickerStore = db.createObjectStore(STORE_FAVORITE_STICKERS, {
-          keyPath: "id",
-        });
-        favStickerStore.createIndex("packId", "packId", { unique: false });
-        favStickerStore.createIndex("savedAt", "savedAt", { unique: false });
-      }
-
-      // Custom Published Packs Store
-      if (!db.objectStoreNames.contains(STORE_CUSTOM_PACKS)) {
-        const customStore = db.createObjectStore(STORE_CUSTOM_PACKS, {
-          keyPath: "id",
-        });
-        customStore.createIndex("category", "category", { unique: false });
-        customStore.createIndex("createdAt", "createdAt", { unique: false });
-      }
-
-      // Creator Follows Store
-      if (!db.objectStoreNames.contains(STORE_CREATOR_FOLLOWS)) {
-        const followStore = db.createObjectStore(STORE_CREATOR_FOLLOWS, {
-          keyPath: "username",
-        });
-        followStore.createIndex("followedAt", "followedAt", { unique: false });
-      }
-    };
-
-    request.onsuccess = () => {
-      exploreDbInstance = request.result;
-      resolve(exploreDbInstance);
-    };
-
-    request.onerror = () => {
-      console.warn("Could not open Explore IndexedDB, will use localStorage fallback:", request.error);
-      reject(request.error);
-    };
-  });
-}
-
 // -------------------------------------------------------------
-// LOCAL STORAGE FALLBACK HELPERS
+// LOCAL STORAGE HELPERS
 // -------------------------------------------------------------
 
 function getLsArray(key: string): string[] {
@@ -122,24 +48,7 @@ export interface FavoritedPackRecord {
  * Get all favorited pack IDs
  */
 export async function getAllFavoritePackIds(): Promise<string[]> {
-  try {
-    const db = await openExploreDb();
-    return new Promise((resolve) => {
-      const transaction = db.transaction([STORE_FAVORITE_PACKS], "readonly");
-      const store = transaction.objectStore(STORE_FAVORITE_PACKS);
-      const request = store.getAll();
-
-      request.onsuccess = () => {
-        const records: FavoritedPackRecord[] = request.result || [];
-        resolve(records.map((r) => r.id));
-      };
-      request.onerror = () => {
-        resolve(getLsArray(LS_KEY_FAV_PACKS));
-      };
-    });
-  } catch {
-    return getLsArray(LS_KEY_FAV_PACKS);
-  }
+  return getLsArray(LS_KEY_FAV_PACKS);
 }
 
 /**
@@ -152,40 +61,16 @@ export async function isPackFavorited(packId: string): Promise<boolean> {
 
 /**
  * Toggle favorite status of a pack
- * Returns new favorited state (true if favorited, false if removed)
  */
 export async function toggleFavoritePack(packId: string): Promise<boolean> {
   const currentFavs = await getAllFavoritePackIds();
   const willBeFavorited = !currentFavs.includes(packId);
 
-  // Update localStorage cache first
   const updatedList = willBeFavorited
     ? [...currentFavs, packId]
     : currentFavs.filter((id) => id !== packId);
   setLsArray(LS_KEY_FAV_PACKS, updatedList);
 
-  try {
-    const db = await openExploreDb();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction([STORE_FAVORITE_PACKS], "readwrite");
-      const store = transaction.objectStore(STORE_FAVORITE_PACKS);
-
-      if (willBeFavorited) {
-        const record: FavoritedPackRecord = { id: packId, savedAt: Date.now() };
-        const req = store.put(record);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      } else {
-        const req = store.delete(packId);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      }
-    });
-  } catch (err) {
-    console.warn("IndexedDB toggleFavoritePack fallback applied:", err);
-  }
-
-  // Dispatch custom browser event so any active explore listeners update immediately
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent("omoji:favorites_changed", {
@@ -206,10 +91,8 @@ export interface FavoritedStickerRecord {
   packId?: string;
   packTitle?: string;
   savedAt: number;
-  sticker?: import("../src/types/explore").ExploreSticker;
+  sticker?: ExploreSticker;
 }
-
-const LS_KEY_FAV_STICKER_RECORDS = "omoji_explore_fav_sticker_records";
 
 function getLsStickerRecords(): FavoritedStickerRecord[] {
   if (typeof window === "undefined") return [];
@@ -226,104 +109,71 @@ function setLsStickerRecords(records: FavoritedStickerRecord[]): void {
   try {
     localStorage.setItem(LS_KEY_FAV_STICKER_RECORDS, JSON.stringify(records));
   } catch (e) {
-    console.warn("localStorage write failed:", e);
+    console.warn("localStorage write sticker records failed:", e);
   }
 }
 
+/**
+ * Get all favorited sticker IDs
+ */
 export async function getAllFavoriteStickerIds(): Promise<string[]> {
-  try {
-    const records = await getAllFavoriteStickerRecords();
-    return records.map((r) => r.id);
-  } catch {
-    return getLsArray(LS_KEY_FAV_STICKERS);
-  }
+  return getLsArray(LS_KEY_FAV_STICKERS);
 }
 
-export async function getAllFavoriteStickerRecords(): Promise<FavoritedStickerRecord[]> {
-  try {
-    const db = await openExploreDb();
-    return new Promise((resolve) => {
-      const transaction = db.transaction([STORE_FAVORITE_STICKERS], "readonly");
-      const store = transaction.objectStore(STORE_FAVORITE_STICKERS);
-      const request = store.getAll();
-
-      request.onsuccess = () => {
-        const records: FavoritedStickerRecord[] = request.result || [];
-        if (records.length === 0) {
-          const ls = getLsStickerRecords();
-          resolve(ls);
-        } else {
-          // Keep LS in sync
-          setLsStickerRecords(records);
-          resolve(records.sort((a, b) => b.savedAt - a.savedAt));
-        }
-      };
-      request.onerror = () => {
-        resolve(getLsStickerRecords());
-      };
-    });
-  } catch {
-    return getLsStickerRecords();
-  }
+/**
+ * Get all favorited sticker records (including sticker metadata)
+ */
+export async function getAllFavoriteStickers(): Promise<FavoritedStickerRecord[]> {
+  const records = getLsStickerRecords();
+  return records.sort((a, b) => b.savedAt - a.savedAt);
 }
 
+export const getAllFavoriteStickerRecords = getAllFavoriteStickers;
+
+/**
+ * Check if a specific sticker is favorited
+ */
 export async function isStickerFavorited(stickerId: string): Promise<boolean> {
-  const ids = await getAllFavoriteStickerIds();
-  return ids.includes(stickerId);
+  const allFavs = await getAllFavoriteStickerIds();
+  return allFavs.includes(stickerId);
 }
 
+/**
+ * Toggle favorite status of a sticker
+ */
 export async function toggleFavoriteSticker(
   stickerId: string,
-  packId?: string,
-  stickerData?: import("../src/types/explore").ExploreSticker,
-  packTitle?: string
+  packIdOrData?: string | { packId?: string; packTitle?: string; sticker?: ExploreSticker },
+  stickerArg?: ExploreSticker,
+  packTitleArg?: string
 ): Promise<boolean> {
-  const currentRecords = await getAllFavoriteStickerRecords();
-  const existingIdx = currentRecords.findIndex((r) => r.id === stickerId);
-  const willBeFavorited = existingIdx === -1;
+  const stickerData: { packId?: string; packTitle?: string; sticker?: ExploreSticker } =
+    typeof packIdOrData === "string"
+      ? { packId: packIdOrData, sticker: stickerArg, packTitle: packTitleArg }
+      : packIdOrData || {};
 
-  let updatedRecords: FavoritedStickerRecord[];
-  if (willBeFavorited) {
-    const newRecord: FavoritedStickerRecord = {
-      id: stickerId,
-      packId,
-      packTitle,
-      savedAt: Date.now(),
-      sticker: stickerData,
-    };
-    updatedRecords = [newRecord, ...currentRecords];
-  } else {
-    updatedRecords = currentRecords.filter((r) => r.id !== stickerId);
-  }
+  const currentFavs = await getAllFavoriteStickerIds();
+  const willBeFavorited = !currentFavs.includes(stickerId);
 
-  setLsStickerRecords(updatedRecords);
-  setLsArray(LS_KEY_FAV_STICKERS, updatedRecords.map((r) => r.id));
+  const updatedIds = willBeFavorited
+    ? [...currentFavs, stickerId]
+    : currentFavs.filter((id) => id !== stickerId);
+  setLsArray(LS_KEY_FAV_STICKERS, updatedIds);
 
-  try {
-    const db = await openExploreDb();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction([STORE_FAVORITE_STICKERS], "readwrite");
-      const store = transaction.objectStore(STORE_FAVORITE_STICKERS);
-
-      if (willBeFavorited) {
-        const req = store.put({
+  const records = getLsStickerRecords();
+  const updatedRecords = willBeFavorited
+    ? [
+        {
           id: stickerId,
-          packId,
-          packTitle,
+          packId: stickerData?.packId,
+          packTitle: stickerData?.packTitle,
           savedAt: Date.now(),
-          sticker: stickerData,
-        });
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      } else {
-        const req = store.delete(stickerId);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      }
-    });
-  } catch (err) {
-    console.warn("IndexedDB toggleFavoriteSticker fallback applied:", err);
-  }
+          sticker: stickerData?.sticker,
+        },
+        ...records.filter((r) => r.id !== stickerId),
+      ]
+    : records.filter((r) => r.id !== stickerId);
+  setLsStickerRecords(updatedRecords);
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(
@@ -336,39 +186,22 @@ export async function toggleFavoriteSticker(
   return willBeFavorited;
 }
 
+/**
+ * Batch remove multiple stickers from favorites
+ */
 export async function batchRemoveFavoriteStickers(stickerIds: string[]): Promise<void> {
-  const currentRecords = await getAllFavoriteStickerRecords();
-  const remaining = currentRecords.filter((r) => !stickerIds.includes(r.id));
+  const currentFavs = await getAllFavoriteStickerIds();
+  const updatedIds = currentFavs.filter((id) => !stickerIds.includes(id));
+  setLsArray(LS_KEY_FAV_STICKERS, updatedIds);
 
-  setLsStickerRecords(remaining);
-  setLsArray(LS_KEY_FAV_STICKERS, remaining.map((r) => r.id));
-
-  try {
-    const db = await openExploreDb();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction([STORE_FAVORITE_STICKERS], "readwrite");
-      const store = transaction.objectStore(STORE_FAVORITE_STICKERS);
-
-      let completed = 0;
-      if (stickerIds.length === 0) return resolve();
-
-      stickerIds.forEach((id) => {
-        const req = store.delete(id);
-        req.onsuccess = () => {
-          completed++;
-          if (completed === stickerIds.length) resolve();
-        };
-        req.onerror = () => reject(req.error);
-      });
-    });
-  } catch (err) {
-    console.warn("IndexedDB batchRemoveFavoriteStickers error:", err);
-  }
+  const records = getLsStickerRecords();
+  const updatedRecords = records.filter((r) => !stickerIds.includes(r.id));
+  setLsStickerRecords(updatedRecords);
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent("omoji:favorites_changed", {
-        detail: { type: "batch_remove", ids: stickerIds },
+        detail: { type: "batch_sticker_remove", ids: stickerIds },
       })
     );
   }
@@ -377,29 +210,6 @@ export async function batchRemoveFavoriteStickers(stickerIds: string[]): Promise
 // -------------------------------------------------------------
 // CUSTOM PUBLISHED PACKS
 // -------------------------------------------------------------
-
-/**
- * Retrieve all custom published packs created by local users
- */
-export async function getCustomPublishedPacks(): Promise<ExplorePack[]> {
-  try {
-    const db = await openExploreDb();
-    return new Promise((resolve) => {
-      const transaction = db.transaction([STORE_CUSTOM_PACKS], "readonly");
-      const store = transaction.objectStore(STORE_CUSTOM_PACKS);
-      const request = store.getAll();
-
-      request.onsuccess = () => {
-        resolve(request.result || []);
-      };
-      request.onerror = () => {
-        resolve(getLsCustomPacks());
-      };
-    });
-  } catch {
-    return getLsCustomPacks();
-  }
-}
 
 function getLsCustomPacks(): ExplorePack[] {
   if (typeof window === "undefined") return [];
@@ -421,6 +231,18 @@ function setLsCustomPacks(packs: ExplorePack[]): void {
 }
 
 /**
+ * Get all custom published packs
+ */
+export async function getCustomPublishedPacks(): Promise<ExplorePack[]> {
+  const packs = getLsCustomPacks();
+  return packs.sort((a, b) => {
+    const timeA = typeof a.updatedAt === "number" ? a.updatedAt : typeof a.updatedAt === "string" ? new Date(a.updatedAt).getTime() : 0;
+    const timeB = typeof b.updatedAt === "number" ? b.updatedAt : typeof b.updatedAt === "string" ? new Date(b.updatedAt).getTime() : 0;
+    return timeB - timeA;
+  });
+}
+
+/**
  * Publish a pack to the local Explore feed
  */
 export async function publishCustomPack(pack: ExplorePack): Promise<void> {
@@ -430,23 +252,8 @@ export async function publishCustomPack(pack: ExplorePack): Promise<void> {
     updatedAt: Date.now(),
   };
 
-  // Sync to LS
   const existingLs = getLsCustomPacks().filter((p) => p.id !== pack.id);
   setLsCustomPacks([publishedPack, ...existingLs]);
-
-  try {
-    const db = await openExploreDb();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction([STORE_CUSTOM_PACKS], "readwrite");
-      const store = transaction.objectStore(STORE_CUSTOM_PACKS);
-      const req = store.put(publishedPack);
-
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn("IndexedDB publishCustomPack fallback applied:", err);
-  }
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(
@@ -464,20 +271,6 @@ export async function deleteCustomPublishedPack(packId: string): Promise<void> {
   const existingLs = getLsCustomPacks().filter((p) => p.id !== packId);
   setLsCustomPacks(existingLs);
 
-  try {
-    const db = await openExploreDb();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction([STORE_CUSTOM_PACKS], "readwrite");
-      const store = transaction.objectStore(STORE_CUSTOM_PACKS);
-      const req = store.delete(packId);
-
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn("IndexedDB deleteCustomPublishedPack error:", err);
-  }
-
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent("omoji:catalog_updated", {
@@ -491,36 +284,8 @@ export async function deleteCustomPublishedPack(packId: string): Promise<void> {
 // CREATOR FOLLOWS SYSTEM
 // -------------------------------------------------------------
 
-export interface CreatorFollowDbRecord {
-  username: string;
-  followedAt: number;
-}
-
 export async function getAllFollowedCreatorUsernames(): Promise<string[]> {
-  try {
-    const db = await openExploreDb();
-    return new Promise((resolve) => {
-      if (!db.objectStoreNames.contains(STORE_CREATOR_FOLLOWS)) {
-        resolve(getLsArray(LS_KEY_CREATOR_FOLLOWS));
-        return;
-      }
-      const transaction = db.transaction([STORE_CREATOR_FOLLOWS], "readonly");
-      const store = transaction.objectStore(STORE_CREATOR_FOLLOWS);
-      const request = store.getAll();
-
-      request.onsuccess = () => {
-        const records: CreatorFollowDbRecord[] = request.result || [];
-        const usernames = records.map((r) => r.username.toLowerCase());
-        setLsArray(LS_KEY_CREATOR_FOLLOWS, usernames);
-        resolve(usernames);
-      };
-      request.onerror = () => {
-        resolve(getLsArray(LS_KEY_CREATOR_FOLLOWS));
-      };
-    });
-  } catch {
-    return getLsArray(LS_KEY_CREATOR_FOLLOWS);
-  }
+  return getLsArray(LS_KEY_CREATOR_FOLLOWS);
 }
 
 export async function isCreatorFollowed(username: string): Promise<boolean> {
@@ -541,31 +306,6 @@ export async function toggleFollowCreator(username: string): Promise<boolean> {
 
   setLsArray(LS_KEY_CREATOR_FOLLOWS, updated);
 
-  try {
-    const db = await openExploreDb();
-    if (db.objectStoreNames.contains(STORE_CREATOR_FOLLOWS)) {
-      await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction([STORE_CREATOR_FOLLOWS], "readwrite");
-        const store = transaction.objectStore(STORE_CREATOR_FOLLOWS);
-
-        if (willFollow) {
-          const req = store.put({
-            username: cleanUsername,
-            followedAt: Date.now(),
-          });
-          req.onsuccess = () => resolve();
-          req.onerror = () => reject(req.error);
-        } else {
-          const req = store.delete(cleanUsername);
-          req.onsuccess = () => resolve();
-          req.onerror = () => reject(req.error);
-        }
-      });
-    }
-  } catch (err) {
-    console.warn("IndexedDB toggleFollowCreator fallback applied:", err);
-  }
-
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent("omoji:creator_followed", {
@@ -576,4 +316,3 @@ export async function toggleFollowCreator(username: string): Promise<boolean> {
 
   return willFollow;
 }
-

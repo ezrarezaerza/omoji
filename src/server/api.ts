@@ -187,11 +187,8 @@ apiRouter.post("/auth/*", (req, res) => {
   return adaptWebHandler(postNextAuth, req, res);
 });
 
-// Mount the API Router to BOTH "/api" and "/"
-// This ensures that whether Vercel rewrites keep the /api prefix or strip it,
-// all endpoints will match and respond with 200 OK instead of 404.
+// Mount the API Router exclusively under "/api" so it does not intercept frontend assets or routes
 app.use("/api", apiRouter);
-app.use("/", apiRouter);
 
 // Default export for Vercel Serverless Function handler
 export default app;

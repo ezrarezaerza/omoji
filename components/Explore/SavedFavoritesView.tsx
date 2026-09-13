@@ -632,7 +632,7 @@ export function SavedFavoritesView({
                       className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25D366] px-3.5 py-2.5 text-xs font-black text-black shadow-xs hover:bg-[#20bd5a] transition-all cursor-pointer font-['Space_Grotesk']"
                     >
                       <Download className="h-3.5 w-3.5 stroke-[2.5]" />
-                      <span>Download .wastickers</span>
+                      <span>Download WhatsApp Pack</span>
                     </button>
 
                     <button

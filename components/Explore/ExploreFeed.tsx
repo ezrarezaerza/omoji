@@ -216,7 +216,7 @@ export function ExploreFeed({
     const studioPack = convertExplorePackToStudioPack(pack);
     onClonePackToStudio(studioPack);
     if (onShowNotice) {
-      onShowNotice(`✨ Cloned "${pack.title}" to your 30-Slot Pack Studio!`);
+      onShowNotice(`✨ Cloned "${pack.title}" to your Sticker Studio!`);
     }
   };
 
@@ -242,7 +242,7 @@ export function ExploreFeed({
               Curated WhatsApp Sticker Packs
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Discover viral trending stickers, classic memes, fluffy animals, and anime reactions. Download instantly as <span className="font-bold text-[#25D366]">.wastickers</span> or clone directly into your 30-slot studio.
+              Discover viral trending stickers, classic memes, fluffy animals, and anime reactions. Download instantly to WhatsApp or clone directly into your studio.
             </p>
           </div>
 

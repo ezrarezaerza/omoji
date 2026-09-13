@@ -1,6 +1,6 @@
 {
   "name": "OMOJI Sticker Studio",
-  "description": "Create fun custom WhatsApp stickers from your favorite photos and memes with effortless 1-click magic.",
+  "description": "Create custom WhatsApp stickers from photos and memes with instant background removal, custom text, and 1-tap export to WhatsApp.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

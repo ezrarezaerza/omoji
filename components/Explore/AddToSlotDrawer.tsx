@@ -10,6 +10,7 @@ import {
   FolderPlus,
   Loader2,
   AlertCircle,
+  Paintbrush,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ExploreSticker, ExplorePack } from "../../src/types/explore";
@@ -21,6 +22,7 @@ interface AddToSlotDrawerProps {
   pack: ExplorePack;
   onSuccess: (pack: StickerPackRecord, slotIndex: number) => void;
   onOpenStudioPack: (pack: StickerPackRecord, slotIndex?: number) => void;
+  onRemixInStudio?: (pack: StickerPackRecord, slotIndex: number, stickerUrl: string, stickerTitle?: string) => void;
   onClose: () => void;
 }
 
@@ -29,6 +31,7 @@ export function AddToSlotDrawer({
   pack,
   onSuccess,
   onOpenStudioPack,
+  onRemixInStudio,
   onClose,
 }: AddToSlotDrawerProps) {
   const [userPacks, setUserPacks] = useState<StickerPackRecord[]>([]);
@@ -176,14 +179,26 @@ export function AddToSlotDrawer({
                 Placed into <strong>Slot #{justSavedSlot + 1}</strong> of "{currentPack.title}"!
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => onOpenStudioPack(currentPack, justSavedSlot)}
-              className="inline-flex items-center gap-1 rounded-xl bg-[#25D366] px-3 py-1.5 text-[11px] font-black text-black shadow-xs hover:bg-[#20bd5a] transition-all cursor-pointer font-['Space_Grotesk']"
-            >
-              <span>View in Studio</span>
-              <ArrowRight className="h-3 w-3" />
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onRemixInStudio && (
+                <button
+                  type="button"
+                  onClick={() => onRemixInStudio(currentPack, justSavedSlot, sticker.imageUrl, sticker.title)}
+                  className="inline-flex items-center gap-1 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-3 py-1.5 text-[11px] font-black shadow-xs hover:bg-slate-800 dark:hover:bg-slate-100 transition-all cursor-pointer font-['Space_Grotesk']"
+                >
+                  <Paintbrush className="h-3 w-3 text-[#25D366]" />
+                  <span>Edit in Studio</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onOpenStudioPack(currentPack, justSavedSlot)}
+                className="inline-flex items-center gap-1 rounded-xl bg-[#25D366] px-3 py-1.5 text-[11px] font-black text-black shadow-xs hover:bg-[#20bd5a] transition-all cursor-pointer font-['Space_Grotesk']"
+              >
+                <span>View Pack</span>
+                <ArrowRight className="h-3 w-3" />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

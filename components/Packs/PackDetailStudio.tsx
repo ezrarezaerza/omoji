@@ -168,7 +168,7 @@ export function PackDetailStudio({
     }
 
     setIsExporting(true);
-    showToast(`Packaging ${occupiedCount} stickers into .wastickers...`);
+    showToast(`Preparing ${occupiedCount} stickers for WhatsApp...`);
 
     try {
       const stickerUrls = pack.stickers.map((s) => s.imageUrl);
@@ -192,10 +192,10 @@ export function PackDetailStudio({
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
 
-      showToast(`Exported "${pack.title}.wastickers" successfully!`);
+      showToast(`Sticker pack "${pack.title}" exported successfully!`);
     } catch (err: any) {
       console.error("Export pack error:", err);
-      showToast(err.message || "Failed to generate .wastickers package.");
+      showToast(err.message || "Failed to export sticker pack.");
     } finally {
       setIsExporting(false);
     }
@@ -366,17 +366,17 @@ export function PackDetailStudio({
             className="inline-flex items-center gap-1.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs font-bold text-[#25D366] hover:bg-emerald-500/20 active:scale-95 transition-all shadow-xs cursor-pointer"
           >
             <CheckCircle2 className="h-4 w-4 text-[#25D366]" />
-            <span>Validate Spec</span>
+            <span>Quality Check</span>
           </button>
 
           <button
             type="button"
             onClick={() => setIsManifestModalOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-2xl border border-slate-200 dark:border-white/15 bg-white dark:bg-white/5 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all shadow-xs cursor-pointer"
-            title="View WhatsApp Sticker Manifest (contents.json)"
+            title="View WhatsApp Pack Information"
           >
             <FileCode2 className="h-4 w-4 text-emerald-500" />
-            <span>WhatsApp Manifest</span>
+            <span>Pack Info</span>
           </button>
 
           {/* Publish to Community Explore */}
@@ -438,10 +438,10 @@ export function PackDetailStudio({
           </div>
           <div>
             <span className="text-xs font-black text-slate-900 dark:text-white">
-              WhatsApp 30-Slot Grid Structure
+              Sticker Collection
             </span>
             <p className="text-[11px] text-slate-600 dark:text-slate-400">
-              Click any slot to open the cutout & effect studio. Finished stickers auto-save to cloud storage.
+              Click any slot to create or edit a sticker. Your progress saves automatically.
             </p>
           </div>
         </div>

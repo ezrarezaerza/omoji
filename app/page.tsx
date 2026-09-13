@@ -17,12 +17,16 @@ import {
   Layers,
   Play,
   RotateCw,
+  User,
+  AlertCircle,
 } from "lucide-react";
 import { AuthForms } from "../components/AuthForms";
+import { StartPackAuthModal } from "../components/Landing/StartPackAuthModal";
 import { StickerWorkspace } from "../components/Editor/StickerWorkspace";
 import { PacksHub } from "../components/Packs/PacksHub";
 import { PackDetailStudio } from "../components/Packs/PackDetailStudio";
 import { ExploreFeed } from "../components/Explore/ExploreFeed";
+import { LandingView } from "../components/Landing/LandingView";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -33,14 +37,18 @@ import {
   StickerDraft,
 } from "../utils/draftsDb";
 import { StickerPackRecord } from "../src/types/pack";
-import { saveStickerToSlot, fetchPackDetails } from "../utils/packApi";
+import { saveStickerToSlot, fetchPackDetails, createPack } from "../utils/packApi";
 import { createWaStickersArchive } from "../utils/createWaStickers";
 import { WhatsAppHandoffModal } from "../components/Packs/WhatsAppHandoffModal";
 
 export default function HomePage() {
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [startPackAuthModal, setStartPackAuthModal] = useState<{
+    isOpen: boolean;
+    packTitle: string;
+  } | null>(null);
   const [showEditor, setShowEditor] = useState(false);
-  const [currentTab, setCurrentTab] = useState<"studio" | "explore">("studio");
+  const [currentTab, setCurrentTab] = useState<"landing" | "studio" | "explore">("landing");
   const [selectedPack, setSelectedPack] = useState<StickerPackRecord | null>(null);
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
   const [handoffPack, setHandoffPack] = useState<StickerPackRecord | null>(null);
@@ -127,8 +135,8 @@ export default function HomePage() {
 
       // Restore active tab
       const savedTab = sessionStorage.getItem("omoji_nav_tab");
-      if (savedTab === "explore" || savedTab === "studio") {
-        setCurrentTab(savedTab as "studio" | "explore");
+      if (savedTab === "explore" || savedTab === "studio" || savedTab === "landing") {
+        setCurrentTab(savedTab as "landing" | "studio" | "explore");
       }
 
       // Restore active pack and slot from sessionStorage if available
@@ -196,7 +204,16 @@ export default function HomePage() {
       localStorage.removeItem("omoji_user_token");
     } catch (e) {}
     setActiveUser(null);
-    setAuthNotice("Signed out successfully.");
+    setCurrentTab("landing");
+    setShowEditor(false);
+    setSelectedSlotIndex(null);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("omoji_nav_tab", "landing");
+      sessionStorage.removeItem("omoji_show_editor");
+      sessionStorage.removeItem("omoji_active_pack_id");
+      sessionStorage.removeItem("omoji_active_slot_index");
+    }
+    setAuthNotice("Signed out successfully. Returned to Home.");
     setTimeout(() => setAuthNotice(null), 3000);
   };
 
@@ -233,7 +250,7 @@ export default function HomePage() {
     setSelectedPack(pack);
     setSelectedSlotIndex(null);
     persistStudioState(pack, null, false);
-    setAuthNotice(`Opened "${pack.title}" in 30-Slot Studio (${pack.stickers?.length || 0}/30 filled)`);
+    setAuthNotice(`Opened "${pack.title}" (${pack.stickers?.length || 0} of 30 stickers)`);
     setTimeout(() => setAuthNotice(null), 3500);
   };
 
@@ -337,7 +354,7 @@ export default function HomePage() {
         setShowEditor(false);
         setSelectedSlotIndex(null);
         persistStudioState(response.pack, null, false);
-        setAuthNotice(`🎉 All 30 slots completed! Ready to export.`);
+        setAuthNotice(`🎉 Pack full (30 stickers)! Ready to export to WhatsApp.`);
         setTimeout(() => setAuthNotice(null), 4000);
       }
     } catch (err: any) {
@@ -362,10 +379,51 @@ export default function HomePage() {
     setHandoffPack(pack);
   };
 
-  const handleTabChange = (tab: "studio" | "explore") => {
+  const handleTabChange = (tab: "landing" | "studio" | "explore") => {
     setCurrentTab(tab);
     if (typeof window !== "undefined") {
       sessionStorage.setItem("omoji_nav_tab", tab);
+    }
+  };
+
+  const executeCreatePack = async (
+    packTitle: string,
+    userOverride?: { id: string; email: string; username: string } | null
+  ) => {
+    try {
+      const user = userOverride !== undefined ? userOverride : activeUser;
+      const publisher = user ? `@${user.username}` : "Guest Creator";
+      const cleanTitle = packTitle?.trim() || "My WhatsApp Pack";
+      const newPack = await createPack({
+        title: cleanTitle,
+        publisher,
+      });
+
+      setSelectedPack(newPack);
+      setSelectedSlotIndex(0);
+      setCurrentTab("studio");
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("omoji_nav_tab", "studio");
+      }
+      persistStudioState(newPack, 0, false);
+      await refreshStudioMetrics();
+      setAuthNotice(`🎉 Created pack "${cleanTitle}"! Let's fill Slot #1.`);
+      setTimeout(() => setAuthNotice(null), 3500);
+    } catch (err: any) {
+      console.error("Failed to initialize pack from kickstarter:", err);
+      setAuthNotice(err.message || "Failed to initialize pack.");
+      setTimeout(() => setAuthNotice(null), 4000);
+    }
+  };
+
+  const handleStartPackRequest = (packTitle: string) => {
+    if (activeUser) {
+      executeCreatePack(packTitle);
+    } else {
+      setStartPackAuthModal({
+        isOpen: true,
+        packTitle: packTitle?.trim() || "My WhatsApp Pack",
+      });
     }
   };
 
@@ -480,8 +538,12 @@ export default function HomePage() {
     <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
       {/* Top Brand Header Bar */}
       <header className="mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-white/10 pb-6">
-        <div className="flex items-center gap-3.5">
-          <div className="flex h-13 w-13 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#25D366] via-[#128C7E] to-[#075E54] text-white shadow-lg shadow-emerald-500/25 shrink-0">
+        <div
+          onClick={() => handleTabChange("landing")}
+          className="flex items-center gap-3.5 cursor-pointer select-none group"
+          title="Go to Home"
+        >
+          <div className="flex h-13 w-13 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#25D366] via-[#128C7E] to-[#075E54] text-white shadow-lg shadow-emerald-500/25 shrink-0 transition-transform group-hover:scale-105">
             <Sticker className="h-7 w-7 text-white stroke-[2.2]" />
           </div>
           <div>
@@ -494,12 +556,25 @@ export default function HomePage() {
               </span>
             </h1>
             <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">
-              30-Slot WhatsApp & Telegram Pack Creator
+              Custom WhatsApp Sticker Studio
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap sm:flex-nowrap">
+          {/* Quick Studio Access button visible on Landing Page ONLY after user has logged in */}
+          {currentTab === "landing" && !showEditor && activeUser && (
+            <button
+              id="landing-open-studio-btn"
+              type="button"
+              onClick={() => handleTabChange("studio")}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#25D366] px-3.5 py-2 font-['Space_Grotesk'] text-xs font-black text-slate-950 shadow-sm transition-all hover:bg-[#20bd5a] active:scale-95 cursor-pointer"
+            >
+              <Layers className="h-3.5 w-3.5 text-slate-950" />
+              <span>Open Studio</span>
+            </button>
+          )}
+
           {/* Theme Switcher */}
           <ThemeToggle />
 
@@ -519,6 +594,22 @@ export default function HomePage() {
                 <span className="hidden sm:inline">Sign Out</span>
               </button>
             </div>
+          ) : currentTab !== "landing" ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-400 shadow-xs">
+                <User className="h-3.5 w-3.5 text-amber-500" />
+                <span className="font-['Space_Grotesk'] font-bold">Login as Guest</span>
+              </div>
+              <button
+                id="auth-open-btn"
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/15 bg-white dark:bg-[#182229] px-3 py-1.5 text-xs font-bold text-slate-800 dark:text-white shadow-xs transition-all hover:bg-slate-50 dark:hover:bg-[#202c33] active:scale-95 cursor-pointer"
+              >
+                <UserCircle className="h-3.5 w-3.5 text-[#25D366]" />
+                <span>Sign In</span>
+              </button>
+            </div>
           ) : (
             <button
               id="auth-open-btn"
@@ -533,8 +624,8 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* App Header / Shell Navigation Bar */}
-      {!showEditor && (
+      {/* User Dashboard Navigation Bar: Displayed ONLY in User Dashboard Area (Studio & Explore) */}
+      {!showEditor && currentTab !== "landing" && (
         <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="inline-flex items-center rounded-2xl border border-slate-200/90 dark:border-white/10 bg-white dark:bg-[#111b21] p-1.5 shadow-sm">
             <button
@@ -579,12 +670,46 @@ export default function HomePage() {
               </span>
             </button>
           </div>
-
-          <div className="hidden sm:flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-            <span className="flex h-2 w-2 rounded-full bg-[#25D366] animate-pulse" />
-            <span>PWA Offline-Ready &amp; IndexedDB Synced</span>
-          </div>
         </div>
+      )}
+
+      {/* Guest Mode Advisory Prompt in User Dashboard */}
+      {!showEditor && currentTab !== "landing" && !activeUser && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-2xl border-2 border-amber-500/30 bg-amber-500/10 dark:bg-amber-950/20 p-4 shadow-sm backdrop-blur-md"
+        >
+          <div className="flex items-start gap-3.5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5">
+              <AlertCircle className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="rounded-md bg-amber-500/25 px-2 py-0.5 text-[11px] font-black text-amber-800 dark:text-amber-300 font-['Space_Grotesk'] tracking-wider uppercase">
+                  Login as Guest
+                </span>
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  Temporary Session Mode
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-2xl">
+                You are currently accessing the dashboard as a <strong>Guest</strong>. To save your sticker packs and slot edits permanently to the online database, please <strong>log in</strong> or <strong>create an account</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+            <button
+              type="button"
+              onClick={() => setShowAuthModal(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#25D366] to-[#128C7E] px-4 py-2.5 font-['Space_Grotesk'] text-xs font-black text-slate-950 shadow-md hover:brightness-105 active:scale-95 transition-all cursor-pointer"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-slate-950" />
+              <span>Log In or Create Account</span>
+            </button>
+          </div>
+        </motion.div>
       )}
 
       {/* Floating Status Notification Toast */}
@@ -629,6 +754,26 @@ export default function HomePage() {
               onCommitSlot={handleCommitSlotFromEditor}
               onNavigateSlot={handleNavigateSlotFromEditor}
               onCommitAndAdvance={handleCommitAndAdvanceFromEditor}
+            />
+          </motion.div>
+        ) : currentTab === "landing" ? (
+          <motion.div
+            key="landing-view"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.25 }}
+          >
+            <LandingView
+              onStartPack={handleStartPackRequest}
+              onOpenCanvas={(imgUrl) => handleOpenEditor(imgUrl)}
+              onExploreCommunity={() => handleTabChange("explore")}
+              onRequestStudioTab={() => handleTabChange("studio")}
+              onClonePack={handleClonePackToStudio}
+              onRemixSticker={handleRemixStickerInStudio}
+              totalProjects={totalProjects}
+              totalStickers={totalStickers}
+              activeUser={activeUser}
             />
           </motion.div>
         ) : currentTab === "explore" ? (
@@ -711,6 +856,30 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
+      {/* Start Pack Authentication Choice Modal (Log In, Sign Up, or Proceed as Guest) */}
+      <AnimatePresence>
+        {startPackAuthModal && (
+          <StartPackAuthModal
+            isOpen={startPackAuthModal.isOpen}
+            packTitle={startPackAuthModal.packTitle}
+            onClose={() => setStartPackAuthModal(null)}
+            onProceedAsGuest={() => {
+              const title = startPackAuthModal.packTitle;
+              setStartPackAuthModal(null);
+              executeCreatePack(title, null);
+            }}
+            onSuccessAuth={(user) => {
+              const title = startPackAuthModal.packTitle;
+              setActiveUser(user);
+              setStartPackAuthModal(null);
+              executeCreatePack(title, user);
+              setAuthNotice(`Signed in as @${user.username} & created pack!`);
+              setTimeout(() => setAuthNotice(null), 4000);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Auth Modal Overlay */}
       <AnimatePresence>
         {showAuthModal && (
@@ -739,7 +908,15 @@ export default function HomePage() {
                 onSuccess={(user) => {
                   setActiveUser(user);
                   setShowAuthModal(false);
-                  setAuthNotice(`Signed in as @${user.username}`);
+                  const targetDashboardTab = currentTab === "explore" ? "explore" : "studio";
+                  setCurrentTab(targetDashboardTab);
+                  setShowEditor(false);
+                  if (typeof window !== "undefined") {
+                    sessionStorage.setItem("omoji_nav_tab", targetDashboardTab);
+                    sessionStorage.removeItem("omoji_show_editor");
+                  }
+                  refreshStudioMetrics();
+                  setAuthNotice(`Signed in as @${user.username}! Welcome to your Dashboard.`);
                   setTimeout(() => setAuthNotice(null), 4000);
                 }}
               />

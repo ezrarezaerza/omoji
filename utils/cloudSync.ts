@@ -1,6 +1,6 @@
 /**
  * Cloud Synchronization & Backup Engine for Omoji Sticker Studio
- * Manages 2-way synchronization between IndexedDB local storage and PostgreSQL / Vercel Blob cloud database.
+ * Manages synchronization and backup with PostgreSQL / Vercel Blob cloud database.
  */
 
 import {
@@ -145,7 +145,7 @@ export async function fetchCloudPacks(userId?: string | null): Promise<CloudPack
 }
 
 /**
- * Pulls cloud packs and creates local IndexedDB drafts if not already present
+ * Pulls cloud packs and caches active drafts if not already present
  */
 export async function pullCloudPacksToLocal(userId?: string | null): Promise<number> {
   try {

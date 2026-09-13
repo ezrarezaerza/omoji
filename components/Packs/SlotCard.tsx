@@ -76,18 +76,6 @@ export function SlotCard({
     }
   };
 
-  const handleDownloadSticker = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const url = sticker?.imageUrl || draft?.activeImageUrl;
-    if (!url) return;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `slot_${slotNumber}_sticker.webp`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
   return (
     <div
       onMouseEnter={() => setIsHovered(true)}
@@ -230,16 +218,7 @@ export function SlotCard({
               title="Edit sticker in Studio"
             >
               <Edit3 className="h-3 w-3" />
-              <span>Edit</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleDownloadSticker}
-              className="flex h-7 w-7 items-center justify-center rounded-xl bg-white/10 text-white/90 hover:bg-white/25 transition-all cursor-pointer"
-              title="Download WebP"
-            >
-              <Download className="h-3 w-3" />
+              <span>Edit Slot</span>
             </button>
 
             <button
